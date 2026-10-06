@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <title>Lịch sử giao dịch</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="brand">TDTU iBanking</div>
+        <div class="user-info"><a href="tuition.html">🔙 Quay lại</a></div>
+    </nav>
+
+    <div class="page-container">
+        <div class="banking-card" style="max-width: 700px;">
+            <h2>Lịch Sử Giao Dịch</h2>
+            <table style="width: 100%; border-collapse: collapse; margin-top: 10px;">
+                <thead>
+                    <tr style="background: #f1f1f1; text-align: left;">
+                        <th style="padding: 8px;">Mã GD</th>
+                        <th style="padding: 8px;">Số tiền</th>
+                        <th style="padding: 8px;">Ngày</th>
+                        <th style="padding: 8px;">Trạng thái</th>
+                    </tr>
+                </thead>
+                <tbody id="history-body"></tbody>
+            </table>
+        </div>
+    </div>
+
+<script>
+    async function loadHistory() {
+        const MaNguoiDung = sessionStorage.getItem('MaNguoiDung');
+        const body = document.getElementById('history-body');
+
+        if (!MaNguoiDung) {
+            body.innerHTML = `<tr><td colspan="4" style="text-align: center; padding: 12px; color: red;">Vui lòng đăng nhập để xem lịch sử!</td></tr>`;
+            return;
+        }
+
+        try {
+
+            const res = await fetch(`http://localhost:8003/api/v1/payments/history/${MaNguoiDung}`);
+            
+            if (!res.ok) {
+                throw new Error('Không thể tải lịch sử giao dịch');
+            }
+
+            const data = await res.json();
+
+            if (!Array.isArray(data) || data.length === 0) {
+                body.innerHTML = `<tr><td colspan="4" style="text-align: center; padding: 12px;">Chưa có lịch sử giao dịch nào.</td></tr>`;
+                return;
+            }
+
+            body.innerHTML = data.map(g => `
+                <tr style="border-bottom: 1px solid #eee;">
+                    <td style="padding: 8px;">${g.MaGiaoDich}</td>
+                    <td style="padding: 8px;">${Number(g.SoTienGiaoDich).toLocaleString('vi-VN')} VNĐ</td>
+                    <td style="padding: 8px;">${new Date(g.NgayGiaoDich).toLocaleString('vi-VN')}</td>
+                    <td style="padding: 8px; font-weight: bold; color: ${g.TrangThai === 'SUCCESS' ? 'green' : (g.TrangThai === 'PENDING' ? 'orange' : 'red')}">
+                        ${g.TrangThai}
+                    </td>
+                </tr>
+            `).join('');
+        } catch (error) {
+            console.error(error);
+            body.innerHTML = `<tr><td colspan="4" style="text-align: center; padding: 12px; color: red;">Lỗi kết nối tới Payment Service!</td></tr>`;
+        }
+    }
+
+    loadHistory();
+</script>
+</body>
+</html>

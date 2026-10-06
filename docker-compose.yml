@@ -1,0 +1,55 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: root
+      POSTGRES_PASSWORD: rootpassword
+      POSTGRES_DB: ibanking
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+
+  auth-service:
+    build: ./backend/auth_service
+    ports:
+      - "8001:8001"
+    environment:
+      - DATABASE_URL=postgresql://root:rootpassword@db:5432/ibanking
+    depends_on:
+      - db
+
+  tuition-service:
+    build: ./backend/tuition_service
+    ports:
+      - "8002:8002"
+    environment:
+      - DATABASE_URL=postgresql://root:rootpassword@db:5432/ibanking
+    depends_on:
+      - db
+
+  payment-service:
+    build: ./backend/payment_service
+    ports:
+      - "8003:8003"
+    environment:
+      - DATABASE_URL=postgresql://root:rootpassword@db:5432/ibanking
+      - AUTH_SERVICE_URL=http://auth-service:8001
+      - TUITION_SERVICE_URL=http://tuition-service:8002
+    depends_on:
+      - db
+      - auth-service
+      - tuition-service
+
+  frontend:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./frontend:/usr/share/nginx/html
+    depends_on:
+      - auth-service
+      - tuition-service
+      - payment-service

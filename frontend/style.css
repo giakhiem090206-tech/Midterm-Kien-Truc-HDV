@@ -1,0 +1,67 @@
+:root {
+    --primary-blue: #0A3D91;
+    --secondary-blue: #155bb5;
+    --bg-color: #f4f7f9;
+    --text-main: #333;
+    --border-color: #e1e5eb;
+    --error-red: #d9534f;
+    --success-green: #28a745;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', Tahoma, sans-serif; }
+body { background-color: var(--bg-color); color: var(--text-main); }
+
+.navbar {
+    background-color: var(--primary-blue);
+    padding: 15px 30px;
+    color: white;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+.navbar .brand { font-size: 20px; font-weight: bold; }
+.navbar .user-info { font-size: 14px; }
+.navbar a { color: white; text-decoration: none; margin-left: 10px; }
+
+.page-container {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: calc(100vh - 60px);
+    padding: 20px;
+}
+
+.banking-card {
+    background: white;
+    width: 100%;
+    max-width: 500px;
+    padding: 30px;
+    border-radius: 10px;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.08);
+}
+.banking-card h2 { color: var(--primary-blue); margin-bottom: 25px; text-align: center; font-size: 24px; }
+
+.form-group { margin-bottom: 18px; }
+.form-group label { display: block; margin-bottom: 6px; font-weight: 600; font-size: 14px; color: #555; }
+.form-control {
+    width: 100%; padding: 12px; border: 1px solid var(--border-color);
+    border-radius: 6px; font-size: 15px;
+}
+.form-control:focus { border-color: var(--primary-blue); outline: none; }
+.form-control:disabled { background-color: #e9ecef; color: #6c757d; cursor: not-allowed; }
+
+.btn-primary {
+    width: 100%; background-color: var(--primary-blue); color: white;
+    padding: 14px; border: none; border-radius: 6px; font-size: 16px;
+    font-weight: bold; cursor: pointer; transition: 0.3s; margin-top: 10px;
+}
+.btn-primary:hover { background-color: var(--secondary-blue); }
+
+.alert { padding: 12px; border-radius: 6px; margin-bottom: 20px; font-weight: bold; display: none; text-align: center; }
+.alert-error { background-color: #f8d7da; color: var(--error-red); border: 1px solid #f5c6cb; }
+.alert-success { background-color: #d4edda; color: var(--success-green); border: 1px solid #c3e6cb; }
+
+.detail-row { display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #eee; }
+.detail-row:last-child { border-bottom: none; }
+.detail-row .label { color: #666; font-weight: 500; }
+.detail-row .value { font-weight: bold; color: var(--primary-blue); }
