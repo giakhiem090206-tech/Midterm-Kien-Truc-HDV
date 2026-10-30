@@ -2,119 +2,218 @@
 <html lang="vi">
 <head>
     <meta charset="UTF-8">
-    <title>Tra cứu học phí</title>
+    <title>Thanh toán học phí</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
     <nav class="navbar">
         <div class="brand">TDTU iBanking</div>
         <div class="user-info">
-            Xin chào, <span id="nav-user-name">Khách</span> 
+            Xin chào, <b id="nav-user-name"></b>
+            | <a href="tuition.html">Thanh toán học phí</a>
             | <a href="history.html">Lịch sử</a>
-            | <a href="login.html" onclick="sessionStorage.clear()">Đăng xuất</a>
+            | <a href="#" onclick="logout()">Đăng xuất</a>
         </div>
     </nav>
 
-    <div class="page-container">
-        <div class="banking-card">
-            <h2>Tra Cứu Học Phí</h2>
-            
-            <div class="form-group">
-                <input type="text" id="mssvSearch" class="form-control" placeholder="Nhập MSSV cần nộp...">
-            </div>
-            <button onclick="lookupTuition()" class="btn-primary" style="margin-bottom: 20px;">Tìm kiếm</button>
+    <div class="page-container top">
+        <div class="banking-card" style="max-width: 620px;">
+            <h2>Thanh Toán Học Phí</h2>
+            <div id="page-msg" class="alert"></div>
 
-            <!-- 1. Thêm display: none để ẩn ô thông báo lỗi mặc định ban đầu -->
-            <div id="not-found-msg" class="alert alert-error" style="display: none;"></div>
-
-            <div id="tuition-info" style="display: none;">
-                <h3 style="margin-bottom: 15px; font-size: 18px; border-bottom: 2px solid var(--primary-blue); padding-bottom: 5px;">Thông tin khoản nộp</h3>
-                
+            <!-- a. Người nộp tiền: lấy từ tài khoản đăng nhập, không cho sửa -->
+            <div class="section">
+                <div class="section-title">1. Người nộp tiền</div>
                 <div class="form-group">
-                    <label>Người nộp tiền (Lấy từ session)</label>
-                    <input type="text" id="payerName" class="form-control" disabled> 
+                    <label>Họ và tên</label>
+                    <input type="text" id="payerName" class="form-control" disabled>
                 </div>
-
-                <div class="detail-row">
-                    <span class="label">Mã số sinh viên:</span>
-                    <span class="value" id="res-mssv"></span>
+                <div class="two-cols">
+                    <div class="form-group">
+                        <label>Số điện thoại</label>
+                        <input type="text" id="payerPhone" class="form-control" disabled>
+                    </div>
+                    <div class="form-group">
+                        <label>Email</label>
+                        <input type="text" id="payerEmail" class="form-control" disabled>
+                    </div>
                 </div>
-                <div class="detail-row">
-                    <span class="label">Tên sinh viên:</span>
-                    <span class="value" id="studentName"></span>
-                </div>
-                <div class="detail-row">
-                    <span class="label">Học kỳ:</span>
-                    <span class="value" id="hocKy"></span>
-                </div>
-                <div class="detail-row">
-                    <span class="label">Số tiền phải nộp:</span>
-                    <span class="value" style="color: var(--error-red); font-size: 18px;"><span id="amount"></span> VNĐ</span>
-                </div>
-                
-                <button onclick="goToPayment()" class="btn-primary" style="margin-top: 20px;">Xác nhận nộp học phí</button>
             </div>
+
+            <!-- b. Thông tin học phí: nhập MSSV -> tự động tra cứu -->
+            <div class="section">
+                <div class="section-title">2. Thông tin học phí</div>
+                <div class="form-group">
+                    <label>Mã số sinh viên (MSSV)</label>
+                    <input type="text" id="mssv" class="form-control" placeholder="Nhập MSSV, ví dụ: 524K0011" autocomplete="off">
+                    <div id="mssv-hint" class="hint"></div>
+                </div>
+                <div class="form-group">
+                    <label>Họ và tên sinh viên</label>
+                    <input type="text" id="studentName" class="form-control" disabled>
+                </div>
+                <div class="two-cols">
+                    <div class="form-group">
+                        <label>Học kỳ</label>
+                        <input type="text" id="hocKy" class="form-control" disabled>
+                    </div>
+                    <div class="form-group">
+                        <label>Số tiền học phí</label>
+                        <input type="text" id="tuitionAmount" class="form-control" disabled>
+                    </div>
+                </div>
+            </div>
+
+            <!-- c. Thông tin thanh toán -->
+            <div class="section">
+                <div class="section-title">3. Thông tin thanh toán</div>
+                <div class="detail-row">
+                    <span class="label">Số dư khả dụng:</span>
+                    <span class="value" id="balance">—</span>
+                </div>
+                <div class="detail-row">
+                    <span class="label">Số tiền cần thanh toán:</span>
+                    <span class="value" id="payAmount" style="color: var(--error-red);">—</span>
+                </div>
+                <div id="balance-hint" class="hint error"></div>
+
+                <div class="terms-box">
+                    <b>Thỏa thuận và điều khoản sử dụng dịch vụ thanh toán học phí</b>
+                    <ol>
+                        <li>Hệ thống chỉ hỗ trợ thanh toán toàn bộ khoản học phí, không hỗ trợ thanh toán một phần.</li>
+                        <li>Người nộp tiền chịu trách nhiệm kiểm tra chính xác MSSV và thông tin sinh viên trước khi xác nhận.</li>
+                        <li>Giao dịch chỉ được thực hiện sau khi xác thực bằng mã OTP gửi qua email, mã có hiệu lực trong 5 phút và chỉ dùng một lần.</li>
+                        <li>Giao dịch thành công không thể hủy hoặc hoàn tiền qua hệ thống iBanking.</li>
+                        <li>Không chia sẻ mã OTP cho bất kỳ ai, kể cả nhân viên ngân hàng hoặc nhà trường.</li>
+                    </ol>
+                </div>
+                <label class="checkbox-row">
+                    <input type="checkbox" id="agreeTerms">
+                    <span>Tôi đã đọc và đồng ý với các thỏa thuận và điều khoản của hệ thống</span>
+                </label>
+            </div>
+
+            <button id="confirmBtn" class="btn-primary" disabled>Xác nhận giao dịch</button>
         </div>
     </div>
 
+    <script src="common.js"></script>
     <script>
-        const hoTenNguoiNop = sessionStorage.getItem('HoTenNguoiNop');
-        document.getElementById('nav-user-name').innerText = hoTenNguoiNop || 'Khách';
+        const pageMsg = document.getElementById('page-msg');
+        const mssvInput = document.getElementById('mssv');
+        const mssvHint = document.getElementById('mssv-hint');
+        const agreeTerms = document.getElementById('agreeTerms');
+        const confirmBtn = document.getElementById('confirmBtn');
 
-        document.getElementById('mssvSearch').addEventListener('keydown', function(e) {
-            if (e.key === 'Enter') lookupTuition();
-        });
+        let profile = null;      // thông tin người nộp tiền (từ Auth Service)
+        let tuition = null;      // khoản học phí đang chọn (từ Tuition Service)
+        let lookupTimer = null;
+        let lookupSeq = 0;       // bỏ qua kết quả tra cứu cũ khi người dùng gõ tiếp
+        let idempotencyKey = null; // giữ nguyên khi gửi lại cùng một yêu cầu tạo giao dịch
 
-        async function lookupTuition() {
-            const mssv = document.getElementById('mssvSearch').value.trim();
-            const notFoundMsg = document.getElementById('not-found-msg');
-            const tuitionInfo = document.getElementById('tuition-info');
+        if (requireLogin()) init();
 
-            // Reset trạng thái các thẻ
-            tuitionInfo.style.display = 'none';
-            notFoundMsg.style.display = 'none';
-
-            // Chặn khi chưa nhập MSSV
-            if (!mssv) {
-                notFoundMsg.innerText = "Vui lòng nhập Mã số sinh viên!";
-                notFoundMsg.style.display = 'block';
-                return;
-            }
-
-            try {
-                const res = await fetch(`http://localhost:8002/api/v1/tuitions/${mssv}`);
-                
-                if (res.status === 404 || !res.ok) {
-                    const errorData = await res.json().catch(() => ({}));
-                    notFoundMsg.innerText = errorData.detail || "Không tìm thấy sinh viên hoặc học phí đã được thanh toán!";
-                    notFoundMsg.style.display = 'block';
-                    return;
+        async function init() {
+            mssvInput.addEventListener('input', () => {
+                clearTimeout(lookupTimer);
+                resetTuition();
+                if (mssvInput.value.trim()) lookupTimer = setTimeout(lookupTuition, 500);
+            });
+            mssvInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    clearTimeout(lookupTimer);
+                    lookupTuition();
                 }
+            });
+            agreeTerms.addEventListener('change', updateState);
+            confirmBtn.addEventListener('click', createTransaction);
 
-                const data = await res.json();
-                
-                // Hiển thị thông tin khoản nộp học phí
-                tuitionInfo.style.display = 'block';
-                document.getElementById('payerName').value = hoTenNguoiNop || '';
-                document.getElementById('res-mssv').innerText = data.MSSV;
-                document.getElementById('studentName').innerText = data.HoTen;
-                document.getElementById('hocKy').innerText = data.HocKy;
-                document.getElementById('amount').innerText = Number(data.SoTienPhaiNop).toLocaleString('vi-VN');
-
-                // Lưu session chuyển tiếp sang trang payment.html
-                sessionStorage.setItem('pay_MaHocPhi', data.MaHocPhi);
-                sessionStorage.setItem('pay_MSSV', data.MSSV);
-                sessionStorage.setItem('pay_Amount', data.SoTienPhaiNop);
-
-            } catch (err) {
-                console.error(err);
-                notFoundMsg.innerText = "Lỗi kết nối tới Tuition Service (Port 8002)!";
-                notFoundMsg.style.display = 'block';
-            }
+            await loadProfile();
         }
 
-        function goToPayment() {
-            window.location.href = 'payment.html';
+        async function loadProfile() {
+            try {
+                profile = await apiFetch(`${API_BASE}/users/me`);
+                document.getElementById('payerName').value = profile.full_name;
+                document.getElementById('payerPhone').value = profile.phone;
+                document.getElementById('payerEmail').value = profile.email;
+                document.getElementById('balance').innerText = formatVND(profile.available_balance);
+            } catch (err) {
+                showAlert(pageMsg, err.message);
+            }
+            updateState();
+        }
+
+        async function lookupTuition() {
+            const mssv = mssvInput.value.trim();
+            if (!mssv) return;
+
+            const seq = ++lookupSeq;
+            mssvHint.className = 'hint info';
+            mssvHint.innerText = 'Đang tra cứu...';
+
+            try {
+                const data = await apiFetch(`${API_BASE}/tuitions/${encodeURIComponent(mssv)}`);
+                if (seq !== lookupSeq) return;
+
+                tuition = data;
+                document.getElementById('studentName').value = data.HoTen;
+                document.getElementById('hocKy').value = data.HocKy;
+                document.getElementById('tuitionAmount').value = formatVND(data.SoTienPhaiNop);
+                mssvHint.className = 'hint success';
+                mssvHint.innerText = '✓ Đã tìm thấy khoản học phí cần thanh toán';
+            } catch (err) {
+                if (seq !== lookupSeq) return;
+                tuition = null;
+                mssvHint.className = 'hint error';
+                mssvHint.innerText = err.message;
+            }
+            updateState();
+        }
+
+        function resetTuition() {
+            lookupSeq++;
+            tuition = null;
+            idempotencyKey = null;
+            ['studentName', 'hocKy', 'tuitionAmount'].forEach(id => document.getElementById(id).value = '');
+            mssvHint.innerText = '';
+            updateState();
+        }
+
+        // Nút "Xác nhận giao dịch" chỉ bật khi: có khoản học phí chưa đóng, đủ số dư và đã đồng ý điều khoản
+        function updateState() {
+            document.getElementById('payAmount').innerText = tuition ? formatVND(tuition.SoTienPhaiNop) : '—';
+
+            const enoughBalance = profile && tuition && profile.available_balance >= tuition.SoTienPhaiNop;
+            document.getElementById('balance-hint').innerText =
+                profile && tuition && !enoughBalance ? 'Số dư khả dụng không đủ để thanh toán khoản học phí này' : '';
+
+            confirmBtn.disabled = !(enoughBalance && agreeTerms.checked);
+        }
+
+        async function createTransaction() {
+            hideAlert(pageMsg);
+            confirmBtn.disabled = true;
+            confirmBtn.innerText = 'Đang gửi mã OTP...';
+
+            try {
+                idempotencyKey = idempotencyKey || newIdempotencyKey();
+                const data = await apiFetch(`${API_BASE}/payments`, {
+                    method: 'POST',
+                    headers: { 'Idempotency-Key': idempotencyKey },
+                    body: { MaHocPhi: tuition.MaHocPhi }
+                });
+                window.location.href = `payment.html?txn=${encodeURIComponent(data.transaction_id)}`;
+            } catch (err) {
+                // Keep the key when the response is lost; the server may have created the payment.
+                // Clear it after a definitive rejection so a deliberate retry starts a new request.
+                if ([400, 401, 403, 404, 409, 422, 502].includes(err.status)) {
+                    idempotencyKey = null;
+                }
+                showAlert(pageMsg, err.message);
+                confirmBtn.innerText = 'Xác nhận giao dịch';
+                await loadProfile();
+            }
         }
     </script>
 </body>

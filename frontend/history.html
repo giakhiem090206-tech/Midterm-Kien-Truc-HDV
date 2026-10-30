@@ -8,19 +8,30 @@
 <body>
     <nav class="navbar">
         <div class="brand">TDTU iBanking</div>
-        <div class="user-info"><a href="tuition.html">🔙 Quay lại</a></div>
+        <div class="user-info">
+            Xin chào, <b id="nav-user-name"></b>
+            | <a href="tuition.html">Thanh toán học phí</a>
+            | <a href="history.html">Lịch sử</a>
+            | <a href="#" onclick="logout()">Đăng xuất</a>
+        </div>
     </nav>
 
-    <div class="page-container">
-        <div class="banking-card" style="max-width: 700px;">
+    <div class="page-container top">
+        <div class="banking-card" style="max-width: 850px;">
             <h2>Lịch Sử Giao Dịch</h2>
-            <table style="width: 100%; border-collapse: collapse; margin-top: 10px;">
+            <div id="msg-box" class="alert"></div>
+            <div class="detail-row">
+                <span class="label">Số dư khả dụng hiện tại:</span>
+                <span class="value" id="balance">—</span>
+            </div>
+            <table class="history-table">
                 <thead>
-                    <tr style="background: #f1f1f1; text-align: left;">
-                        <th style="padding: 8px;">Mã GD</th>
-                        <th style="padding: 8px;">Số tiền</th>
-                        <th style="padding: 8px;">Ngày</th>
-                        <th style="padding: 8px;">Trạng thái</th>
+                    <tr>
+                        <th>Thời gian</th>
+                        <th>Mã giao dịch</th>
+                        <th>Sinh viên</th>
+                        <th style="text-align: right;">Số tiền</th>
+                        <th>Trạng thái</th>
                     </tr>
                 </thead>
                 <tbody id="history-body"></tbody>
@@ -28,48 +39,40 @@
         </div>
     </div>
 
-<script>
-    async function loadHistory() {
-        const MaNguoiDung = sessionStorage.getItem('MaNguoiDung');
+    <script src="common.js"></script>
+    <script>
         const body = document.getElementById('history-body');
 
-        if (!MaNguoiDung) {
-            body.innerHTML = `<tr><td colspan="4" style="text-align: center; padding: 12px; color: red;">Vui lòng đăng nhập để xem lịch sử!</td></tr>`;
-            return;
-        }
+        if (requireLogin()) loadHistory();
 
-        try {
+        async function loadHistory() {
+            body.innerHTML = `<tr><td colspan="5" style="text-align: center;">Đang tải...</td></tr>`;
+            try {
+                const [me, history] = await Promise.all([
+                    apiFetch(`${API_BASE}/users/me`),
+                    apiFetch(`${API_BASE}/payments`)
+                ]);
+                document.getElementById('balance').innerText = formatVND(me.available_balance);
 
-            const res = await fetch(`http://localhost:8003/api/v1/payments/history/${MaNguoiDung}`);
-            
-            if (!res.ok) {
-                throw new Error('Không thể tải lịch sử giao dịch');
+                if (history.length === 0) {
+                    body.innerHTML = `<tr><td colspan="5" style="text-align: center;">Chưa có giao dịch nào.</td></tr>`;
+                    return;
+                }
+
+                body.innerHTML = history.map(g => `
+                    <tr>
+                        <td>${new Date(g.NgayGiaoDich).toLocaleString('vi-VN')}</td>
+                        <td title="${escapeHtml(g.MaGiaoDich)}">${escapeHtml(g.MaGiaoDich.slice(0, 14))}…</td>
+                        <td>${escapeHtml(g.MSSV)} - ${escapeHtml(g.TenSinhVien)}</td>
+                        <td style="text-align: right; font-weight: bold;">${formatVND(g.SoTienGiaoDich)}</td>
+                        <td><span class="status-badge status-${g.TrangThai}">${STATUS_LABELS[g.TrangThai] || g.TrangThai}</span></td>
+                    </tr>
+                `).join('');
+            } catch (err) {
+                body.innerHTML = '';
+                showAlert(document.getElementById('msg-box'), err.message);
             }
-
-            const data = await res.json();
-
-            if (!Array.isArray(data) || data.length === 0) {
-                body.innerHTML = `<tr><td colspan="4" style="text-align: center; padding: 12px;">Chưa có lịch sử giao dịch nào.</td></tr>`;
-                return;
-            }
-
-            body.innerHTML = data.map(g => `
-                <tr style="border-bottom: 1px solid #eee;">
-                    <td style="padding: 8px;">${g.MaGiaoDich}</td>
-                    <td style="padding: 8px;">${Number(g.SoTienGiaoDich).toLocaleString('vi-VN')} VNĐ</td>
-                    <td style="padding: 8px;">${new Date(g.NgayGiaoDich).toLocaleString('vi-VN')}</td>
-                    <td style="padding: 8px; font-weight: bold; color: ${g.TrangThai === 'SUCCESS' ? 'green' : (g.TrangThai === 'PENDING' ? 'orange' : 'red')}">
-                        ${g.TrangThai}
-                    </td>
-                </tr>
-            `).join('');
-        } catch (error) {
-            console.error(error);
-            body.innerHTML = `<tr><td colspan="4" style="text-align: center; padding: 12px; color: red;">Lỗi kết nối tới Payment Service!</td></tr>`;
         }
-    }
-
-    loadHistory();
-</script>
+    </script>
 </body>
 </html>

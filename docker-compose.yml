@@ -1,54 +1,103 @@
-version: '3.8'
 
+# Cổng vào duy nhất: API Gateway http://localhost (giao diện web + /api/v1/...).
+# Các service và database chỉ giao tiếp trong mạng Docker, không mở port ra máy host.
+# Cần gọi thẳng service để debug: docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 services:
+  # Một Postgres server chứa 3 database tách biệt (auth_db, tuition_db, payment_db),
+  # mỗi service chỉ kết nối tới database của chính nó.
   db:
     image: postgres:15-alpine
     environment:
       POSTGRES_USER: root
       POSTGRES_PASSWORD: rootpassword
-      POSTGRES_DB: ibanking
-    ports:
-      - "5432:5432"
     volumes:
       - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      # Chỉ kiểm tra qua TCP để không báo "ready" khi init.sql còn đang chạy
+      test: ["CMD-SHELL", "pg_isready -U root -h 127.0.0.1"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
 
+  # Build từ thư mục backend/ để mỗi service chép được module dùng chung backend/shared
   auth-service:
-    build: ./backend/auth_service
-    ports:
-      - "8001:8001"
+    build:
+      context: ./backend
+      dockerfile: auth_service/Dockerfile
     environment:
-      - DATABASE_URL=postgresql://root:rootpassword@db:5432/ibanking
+      - DATABASE_URL=postgresql://root:rootpassword@db:5432/auth_db
+      - JWT_SECRET=${JWT_SECRET:-ibanking-dev-jwt-secret-change-me-0123456789}
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY:-ibanking-dev-internal-key}
     depends_on:
-      - db
+      db:
+        condition: service_healthy
 
   tuition-service:
-    build: ./backend/tuition_service
-    ports:
-      - "8002:8002"
+    build:
+      context: ./backend
+      dockerfile: tuition_service/Dockerfile
     environment:
-      - DATABASE_URL=postgresql://root:rootpassword@db:5432/ibanking
+      - DATABASE_URL=postgresql://root:rootpassword@db:5432/tuition_db
+      - JWT_SECRET=${JWT_SECRET:-ibanking-dev-jwt-secret-change-me-0123456789}
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY:-ibanking-dev-internal-key}
     depends_on:
-      - db
+      db:
+        condition: service_healthy
 
   payment-service:
-    build: ./backend/payment_service
-    ports:
-      - "8003:8003"
+    build:
+      context: ./backend
+      dockerfile: payment_service/Dockerfile
     environment:
-      - DATABASE_URL=postgresql://root:rootpassword@db:5432/ibanking
+      - DATABASE_URL=postgresql://root:rootpassword@db:5432/payment_db
+      - JWT_SECRET=${JWT_SECRET:-ibanking-dev-jwt-secret-change-me-0123456789}
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY:-ibanking-dev-internal-key}
       - AUTH_SERVICE_URL=http://auth-service:8001
       - TUITION_SERVICE_URL=http://tuition-service:8002
+      - NOTIFICATION_SERVICE_URL=http://notification-service:8004
     depends_on:
-      - db
-      - auth-service
-      - tuition-service
+      db:
+        condition: service_healthy
+      auth-service:
+        condition: service_started
+      tuition-service:
+        condition: service_started
+      notification-service:
+        condition: service_started
 
-  frontend:
+  # Adapter gửi thông báo: các service khác gọi REST, không cần biết phía sau là Mailpit hay Gmail
+  notification-service:
+    build:
+      context: ./backend
+      dockerfile: notification_service/Dockerfile
+    environment:
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY:-ibanking-dev-internal-key}
+      - EMAIL_PROVIDER=${EMAIL_PROVIDER:-smtp}
+      # Mặc định gửi vào Mailpit; cấu hình file .env để gửi qua Gmail
+      - SMTP_HOST=${SMTP_HOST:-mailpit}
+      - SMTP_PORT=${SMTP_PORT:-1025}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
+      - SMTP_USE_TLS=${SMTP_USE_TLS:-false}
+      - MAIL_FROM=${MAIL_FROM:-iBanking TDTU <no-reply@ibanking.local>}
+    depends_on:
+      mailpit:
+        condition: service_started
+
+  # Hộp thư giả để xem email OTP/xác nhận: http://localhost:8025
+  mailpit:
+    image: axllent/mailpit
+    ports:
+      - "8025:8025"
+
+  # API Gateway (Nginx): phục vụ giao diện web và định tuyến /api/v1/... tới các service
+  gateway:
     image: nginx:alpine
     ports:
       - "80:80"
     volumes:
-      - ./frontend:/usr/share/nginx/html
+      - ./frontend:/usr/share/nginx/html:ro
+      - ./gateway/nginx.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
       - auth-service
       - tuition-service

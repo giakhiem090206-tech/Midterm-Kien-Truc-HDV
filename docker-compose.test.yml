@@ -1,0 +1,18 @@
+# Stack kiểm thử cô lập, chạy song song với stack chính mà không đụng dữ liệu của nó:
+#   docker compose -p midterm-check -f docker-compose.yml -f docker-compose.test.yml up -d --build
+# Gateway ở port 18080, Mailpit ở 18025; email luôn vào Mailpit (bỏ qua cấu hình Gmail trong .env).
+services:
+  notification-service:
+    environment:
+      SMTP_HOST: mailpit
+      SMTP_PORT: "1025"
+      SMTP_USER: ""
+      SMTP_PASSWORD: ""
+      SMTP_USE_TLS: "false"
+      MAIL_FROM: "iBanking TDTU <no-reply@ibanking.local>"
+  mailpit:
+    ports: !override
+      - "18025:8025"
+  gateway:
+    ports: !override
+      - "18080:80"

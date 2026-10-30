@@ -1,0 +1,19 @@
+# Tuỳ chọn khi phát triển/debug: mở port của từng service và database ra máy host
+# (bình thường mọi request đi qua API Gateway http://localhost).
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+services:
+  db:
+    ports:
+      - "5432:5432"
+  auth-service:
+    ports:
+      - "8001:8001"
+  tuition-service:
+    ports:
+      - "8002:8002"
+  payment-service:
+    ports:
+      - "8003:8003"
+  notification-service:
+    ports:
+      - "8004:8004"
