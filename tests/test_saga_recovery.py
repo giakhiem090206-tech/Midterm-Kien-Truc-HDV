@@ -5,6 +5,7 @@ temporarily stops tuition-service and always starts it again in a finally block.
 """
 import json
 import os
+import re
 import subprocess
 import time
 import unittest
@@ -40,7 +41,10 @@ def request(method, url, body=None, token=None):
         with urllib.request.urlopen(req, timeout=20) as response:
             return response.status, json.loads(response.read() or "null")
     except urllib.error.HTTPError as exc:
-        return exc.code, json.loads(exc.read() or "null")
+        try:
+            return exc.code, json.loads(exc.read() or "null")
+        finally:
+            exc.close()
 
 
 def login(username):
@@ -58,7 +62,6 @@ def read_otp(transaction_id):
         _, result = request("GET", f"{MAILPIT}/search?query={query}")
         for message in result.get("messages", []):
             _, body = request("GET", f"{MAILPIT}/message/{message['ID']}")
-            import re
             match = re.search(r'letter-spacing: 8px;">(\d{6})<', body.get("HTML", ""))
             if match:
                 return match.group(1)

@@ -6,6 +6,7 @@ Cách chạy (sau khi `docker compose up -d`):
     python tests/demo_test.py concurrency1   # nhiều giao dịch đồng thời trên cùng 1 tài khoản
     python tests/demo_test.py concurrency2   # nhiều tài khoản cùng thanh toán 1 khoản học phí
     python tests/demo_test.py gateway        # Swagger qua Gateway + Gateway chỉ mở API công khai
+    python tests/demo_test.py otp            # OTP: nhập sai đủ 5 lần, OTP hết hạn
 
 Mỗi kịch bản cần dữ liệu ban đầu, reset trước khi chạy:
     docker compose down -v; docker compose up -d --wait
@@ -13,6 +14,7 @@ Mỗi kịch bản cần dữ liệu ban đầu, reset trước khi chạy:
 import json
 import os
 import re
+import subprocess
 import sys
 import threading
 import time
@@ -40,7 +42,10 @@ def call(method, url, body=None, token=None, headers=None):
         with urllib.request.urlopen(req, timeout=30) as res:
             return res.status, json.loads(res.read() or "null")
     except urllib.error.HTTPError as e:
-        return e.code, json.loads(e.read() or "null")
+        try:
+            return e.code, json.loads(e.read() or "null")
+        finally:
+            e.close()
 
 
 def check(name, status, expected, data=None):
@@ -242,6 +247,67 @@ def http_get(url):
         return e.code, e.read().decode("utf-8")
 
 
+def expire_otp(transaction_id):
+    """
+    Giả lập đã quá 5 phút: lùi thời điểm hết hạn OTP của giao dịch về quá khứ trong payment_db
+    (không phải chờ thật). Dùng cùng project/compose file với stack đang test.
+    """
+    command = ["docker", "compose"]
+    for path in filter(None, os.getenv("TEST_COMPOSE_FILES", "").split(";")):
+        command += ["-f", path]
+    if os.getenv("TEST_COMPOSE_PROJECT"):
+        command += ["-p", os.getenv("TEST_COMPOSE_PROJECT")]
+    sql = ('UPDATE "XacThucOTP" SET "ThoiGianHetHan" = (now() AT TIME ZONE \'UTC\') - interval \'1 minute\' '
+           f'WHERE "MaGiaoDich" = \'{transaction_id}\'')
+    command += ["exec", "-T", "db", "psql", "-U", "root", "-d", "payment_db", "-tAc", sql]
+    subprocess.run(command, check=True, capture_output=True)
+
+
+def transaction_status(token, transaction_id):
+    return call("GET", f"{PAYMENT}/payments/{transaction_id}", token=token)[1]["TrangThai"]
+
+
+def scenario_otp():
+    print("=== OTP: nhập sai đủ 5 lần và OTP hết hạn (khiem123 thanh toán 524K0011) ===")
+    khiem = login("khiem123")
+    hp = tuition_id(khiem, "524K0011")
+    before = balance(khiem)
+
+    print("--- 1. Nhập sai OTP đủ 5 lần")
+    txn = create_payment(khiem, hp)[1]["transaction_id"]
+    otp = otp_from_mailpit(txn)
+    wrong = "000000" if otp != "000000" else "111111"
+    for attempt in range(1, 6):
+        s, d = confirm(khiem, txn, wrong)
+        check(f"Nhập sai lần {attempt}", s, 400, d)
+    s, d = confirm(khiem, txn, otp)
+    check("Nhập đúng OTP sau khi giao dịch đã bị huỷ", s, 409, d)
+    status = transaction_status(khiem, txn)
+    check_true(f"Giao dịch chuyển sang FAILED (hiện tại: {status})", status == "FAILED")
+
+    print("--- 2. Nhập đúng OTP nhưng đã quá 5 phút")
+    txn = create_payment(khiem, hp)[1]["transaction_id"]
+    otp = otp_from_mailpit(txn)
+    expire_otp(txn)
+    s, d = confirm(khiem, txn, otp)
+    check("Xác nhận bằng OTP đã hết hạn", s, 400, d)
+    status = transaction_status(khiem, txn)
+    check_true(f"Giao dịch chuyển sang FAILED (hiện tại: {status})", status == "FAILED")
+
+    print("--- 3. OTP hết hạn mà người dùng không nhập")
+    txn = create_payment(khiem, hp)[1]["transaction_id"]
+    expire_otp(txn)
+    status = transaction_status(khiem, txn)
+    check_true(f"Xem giao dịch -> tự chuyển FAILED (hiện tại: {status})", status == "FAILED")
+    history = {g["MaGiaoDich"]: g["TrangThai"] for g in call("GET", f"{PAYMENT}/payments", token=khiem)[1]}
+    check_true("Lịch sử ghi giao dịch hết hạn là FAILED", history.get(txn) == "FAILED")
+
+    after = balance(khiem)
+    check_true(f"Số dư không đổi sau các giao dịch thất bại ({before:,.0f} -> {after:,.0f})", after == before)
+    s, d = call("GET", f"{TUITION}/tuitions/524K0011", token=khiem)
+    check("Khoản học phí 524K0011 vẫn chưa đóng", s, 200, d)
+
+
 def scenario_gateway():
     """
     Đọc tài liệu Swagger (openapi.json) của từng service qua Gateway, rồi gọi thử MỌI API trong đó
@@ -279,7 +345,7 @@ def scenario_gateway():
 
 if __name__ == "__main__":
     scenarios = {"api": scenario_api, "concurrency1": scenario_concurrency1, "concurrency2": scenario_concurrency2,
-                 "gateway": scenario_gateway}
+                 "gateway": scenario_gateway, "otp": scenario_otp}
     name = sys.argv[1] if len(sys.argv) > 1 else "api"
     if name not in scenarios:
         sys.exit(f"Kịch bản hợp lệ: {', '.join(scenarios)}")

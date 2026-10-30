@@ -276,6 +276,9 @@ docker compose @compose down -v; docker compose @compose up -d --wait
 python tests/demo_test.py concurrency2
 
 docker compose @compose down -v; docker compose @compose up -d --wait
+python tests/demo_test.py otp
+
+docker compose @compose down -v; docker compose @compose up -d --wait
 python -m unittest discover -s tests -p 'test_*.py' -v
 
 docker compose @compose down -v
