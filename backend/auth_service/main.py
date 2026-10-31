@@ -38,7 +38,7 @@ def ensure_seed_users():
                     ho_ten="Thân Vũ Gia Khiêm",
                     so_dien_thoai="0901111111",
                     email="524K0006@student.tdtu.edu.vn",
-                    so_du=20000000.00
+                    so_du=10000000.00
                 ),
                 UserModel(
                     mssv="524K0011",
@@ -50,13 +50,22 @@ def ensure_seed_users():
                     so_du=10000000.00
                 ),
                 UserModel(
-                    mssv="524V0005",
+                    mssv="523V0005",
                     ten_dang_nhap="nhi123",
                     mat_khau="123456",
                     ho_ten="Hồng Bảo Nhi",
                     so_dien_thoai="0903333333",
-                    email="524V0005@student.tdtu.edu.vn",
-                    so_du=2000000.00
+                    email="523V0005@student.tdtu.edu.vn",
+                    so_du=10000000.00
+                ),
+                UserModel(
+                    mssv="524V0007",
+                    ten_dang_nhap="nhu123",
+                    mat_khau="123456",
+                    ho_ten="Phan Nguyễn Thảo Như",
+                    so_dien_thoai="0904444444",
+                    email="524V0007@student.tdtu.edu.vn",
+                    so_du=10000000.00
                 ),
             ])
             db.commit()

@@ -6,14 +6,22 @@ Chạy trực tiếp bằng lệnh:
     python test_concurrency.py
 """
 
+import os
+import sys
 import json
 import urllib.request
 import urllib.error
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-AUTH_URL = "http://localhost:8001"
-TUITION_URL = "http://localhost:8002"
-PAYMENT_URL = "http://localhost:8003"
+# Đảm bảo hiển thị tiếng Việt có dấu trên Windows Terminal / PowerShell không bị lỗi UnicodeEncodeError
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8")
+
+AUTH_URL = os.getenv("AUTH_SERVICE_URL", "http://localhost:8001")
+TUITION_URL = os.getenv("TUITION_SERVICE_URL", "http://localhost:8002")
+PAYMENT_URL = os.getenv("PAYMENT_SERVICE_URL", "http://localhost:8003")
 
 
 def http_request(method: str, url: str, body: dict = None, headers: dict = None):
@@ -23,7 +31,7 @@ def http_request(method: str, url: str, body: dict = None, headers: dict = None)
     data = json.dumps(body).encode("utf-8") if body is not None else None
     req = urllib.request.Request(url, data=data, headers=req_headers, method=method)
     try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        with urllib.request.urlopen(req, timeout=30) as resp:
             return resp.status, json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         err_body = e.read().decode("utf-8")
@@ -42,7 +50,7 @@ def print_banner(title: str):
 def reset_data():
     status, data = http_request("POST", f"{PAYMENT_URL}/api/v1/payments/demo/reset")
     assert status == 200, f"Không thể reset dữ liệu mẫu: {data}"
-    print("[✓] Đã khôi phục dữ liệu mẫu về trạng thái chuẩn ban đầu.")
+    print("[OK] Đã khôi phục dữ liệu mẫu về trạng thái chuẩn ban đầu.")
 
 
 def test_scenario_1_same_account_concurrent_payments():
@@ -51,30 +59,32 @@ def test_scenario_1_same_account_concurrent_payments():
     Nhiều giao dịch đồng thời trên cùng một tài khoản:
     - Tài khoản `phuc123` có số dư khả dụng: 10,000,000 VNĐ.
     - Khởi tạo đồng thời 2 giao dịch cho 2 sinh viên:
-      + Giao dịch A: Đóng cho MSSV 524K0001 (Số tiền: 7,500,000 VNĐ)
-      + Giao dịch B: Đóng cho MSSV 524K0005 (Số tiền: 8,000,000 VNĐ)
-    - Tổng 2 khoản là 15,500,000 VNĐ (> 10,000,000 VNĐ).
+      + Giao dịch A: Đóng cho MSSV 524K0011 (5,300,000 VNĐ)
+      + Giao dịch B: Đóng cho MSSV 523V0005 (5,300,000 VNĐ)
+    - Tổng 2 khoản là 10,600,000 VNĐ (> 10,000,000 VNĐ).
     - Khi bắn xác nhận OTP đồng thời (Concurrency):
       + Hệ thống dùng Pessimistic Locking (SELECT ... FOR UPDATE) khóa dòng `nguoi_dung`.
-      + Chỉ ĐÚNG 1 giao dịch thành công (SUCCESS), giao dịch còn lại bị từ chối (400 Bad Request - FAILED) do số dư còn lại không đủ.
+      + Chỉ ĐÚNG 1 giao dịch thành công (SUCCESS), giao dịch còn lại bị từ chối (400 Bad Request - FAILED) do số dư còn lại (4,700,000 VNĐ) không đủ.
       + Số dư cuối cùng không bị âm (>= 0).
     """
     print_banner("TEST TÌNH HUỐNG 1: NHIỀU GIAO DỊCH ĐỒNG THỜI TRÊN CÙNG 1 TÀI KHOẢN (CHỐNG ÂM SỐ DƯ)")
     reset_data()
 
-    # 1. Đăng nhập tài khoản phuc123 (Số dư 10,000,000 VNĐ)
+    # 1. Đăng nhập tài khoản phuc123
     status, login_data = http_request("POST", f"{AUTH_URL}/api/v1/auth/login", {"username": "phuc123", "password": "123456"})
     assert status == 200, f"Lỗi đăng nhập: {login_data}"
     user_id = login_data["MaNguoiDung"]
-    print(f"[1] Đăng nhập 'phuc123' (ID={user_id}) | Số dư ban đầu: {login_data['SoDuKhaDung']:,.0f} VNĐ")
+    initial_balance = float(login_data["SoDuKhaDung"])
+    print(f"[1] Đăng nhập 'phuc123' (ID={user_id}) | Số dư ban đầu: {initial_balance:,.0f} VNĐ")
 
     # 2. Tra cứu 2 khoản học phí
-    _, hp1 = http_request("GET", f"{TUITION_URL}/api/v1/tuitions/524K0011")
-    _, hp2 = http_request("GET", f"{TUITION_URL}/api/v1/tuitions/523V0005")
+    s_hp1, hp1 = http_request("GET", f"{TUITION_URL}/api/v1/tuitions/524K0011")
+    s_hp2, hp2 = http_request("GET", f"{TUITION_URL}/api/v1/tuitions/523V0005")
+    assert s_hp1 == 200 and s_hp2 == 200, f"Không tìm thấy học phí: {hp1} | {hp2}"
     print(f"[2] Khoản học phí 1: MSSV {hp1['MSSV']} - {hp1['SoTienPhaiNop']:,.0f} VNĐ")
     print(f"[2] Khoản học phí 2: MSSV {hp2['MSSV']} - {hp2['SoTienPhaiNop']:,.0f} VNĐ")
 
-    # 3. Khởi tạo cả 2 giao dịch (lúc này số dư 10tr vẫn >= 7.5tr và >= 8.0tr nên cả 2 đều nhận được OTP)
+    # 3. Khởi tạo cả 2 giao dịch (lúc này số dư 10tr >= 5.3tr nên cả 2 đều nhận được OTP)
     s1, init1 = http_request("POST", f"{PAYMENT_URL}/api/v1/payments/initiate", {"MaNguoiDung": user_id, "MaHocPhi": hp1["MaHocPhi"]})
     s2, init2 = http_request("POST", f"{PAYMENT_URL}/api/v1/payments/initiate", {"MaNguoiDung": user_id, "MaHocPhi": hp2["MaHocPhi"]})
     assert s1 == 201 and s2 == 201, f"Khởi tạo thất bại: {init1} | {init2}"
@@ -105,22 +115,23 @@ def test_scenario_1_same_account_concurrent_payments():
 
     # 5. Kiểm tra số dư cuối cùng của phuc123
     _, user_after = http_request("GET", f"{AUTH_URL}/api/v1/users/{user_id}")
-    print(f"[5] Số dư của 'phuc123' sau khi 2 giao dịch chạy đồng thời: {user_after['available_balance']:,.0f} VNĐ")
+    final_balance = float(user_after["available_balance"])
+    print(f"[5] Số dư của 'phuc123' sau khi 2 giao dịch chạy đồng thời: {final_balance:,.0f} VNĐ")
 
     assert success_count == 1 and failed_count == 1, "LỖI CONCURRENCY: Phải có đúng 1 GD thành công và 1 GD bị chặn!"
-    assert user_after["available_balance"] >= 0, "LỖI CONCURRENCY: Số dư bị âm!"
-    print("[✓] KẾT LUẬN TÌNH HUỐNG 1: PASS! Đảm bảo chống chi tiêu vượt số dư khả dụng.")
+    assert final_balance >= 0, "LỖI CONCURRENCY: Số dư bị âm!"
+    print("[PASS] KẾT LUẬN TÌNH HUỐNG 1: Đảm bảo chống chi tiêu vượt số dư khả dụng.")
 
 
 def test_scenario_2_multiple_accounts_same_tuition():
     """
     TÌNH HUỐNG 2 (Đề bài mục 5 & Rubric mục 6):
     Nhiều tài khoản cùng thanh toán một khoản học phí:
-    - Hai người dùng `khiem123` (20tr VNĐ) và `phuc123` (10tr VNĐ) cùng thanh toán cho 1 MSSV `524K0001` (7,500,000 VNĐ).
+    - Hai người dùng `khiem123` và `phuc123` cùng thanh toán cho 1 MSSV `524K0011` (5,300,000 VNĐ).
     - Cả hai khởi tạo giao dịch và nhận mã OTP riêng.
     - Khi cả hai bấm xác nhận OTP ĐỒNG THỜI:
       + Hệ thống dùng Pessimistic Locking (SELECT ... FOR UPDATE) khóa dòng `hoc_phi`.
-      + Khoản học phí của `524K0001` chỉ được thanh toán thành công ĐÚNG 1 LẦN.
+      + Khoản học phí của `524K0011` chỉ được thanh toán thành công ĐÚNG 1 LẦN.
       + Chỉ 1 người bị trừ tiền, người còn lại nhận thông báo lỗi 400 và giữ nguyên số dư.
     """
     print_banner("TEST TÌNH HUỐNG 2: NHIỀU TÀI KHOẢN ĐỒNG THỜI ĐÓNG CÙNG 1 HỌC PHÍ (CHỐNG ĐÓNG TRÙNG)")
@@ -130,11 +141,14 @@ def test_scenario_2_multiple_accounts_same_tuition():
     _, u1 = http_request("POST", f"{AUTH_URL}/api/v1/auth/login", {"username": "khiem123", "password": "123456"})
     _, u2 = http_request("POST", f"{AUTH_URL}/api/v1/auth/login", {"username": "phuc123", "password": "123456"})
     user1_id, user2_id = u1["MaNguoiDung"], u2["MaNguoiDung"]
+    u1_before = float(u1["SoDuKhaDung"])
+    u2_before = float(u2["SoDuKhaDung"])
 
-    # 2. Cùng tra cứu MSSV 524K0011 (7,500,000 VNĐ)
+    # 2. Cùng tra cứu MSSV 524K0011
     _, hp = http_request("GET", f"{TUITION_URL}/api/v1/tuitions/524K0011")
     ma_hoc_phi = hp["MaHocPhi"]
-    print(f"[1] Hai tài khoản 'khiem123' và 'phuc123' cùng đóng cho MSSV {hp['MSSV']} ({hp['SoTienPhaiNop']:,.0f} VNĐ)")
+    tuition_amount = float(hp["SoTienPhaiNop"])
+    print(f"[1] Hai tài khoản 'khiem123' và 'phuc123' cùng đóng cho MSSV {hp['MSSV']} ({tuition_amount:,.0f} VNĐ)")
 
     # 3. Cả 2 cùng khởi tạo giao dịch và nhận OTP riêng
     s1, init1 = http_request("POST", f"{PAYMENT_URL}/api/v1/payments/initiate", {"MaNguoiDung": user1_id, "MaHocPhi": ma_hoc_phi})
@@ -170,20 +184,24 @@ def test_scenario_2_multiple_accounts_same_tuition():
     _, u2_after = http_request("GET", f"{AUTH_URL}/api/v1/users/{user2_id}")
     _, hp_after = http_request("GET", f"{TUITION_URL}/api/v1/tuitions/524K0011")
 
-    print(f"[4] Số dư khiem123 sau GD: {u1_after['available_balance']:,.0f} VNĐ (Ban đầu: 20,000,000 VNĐ)")
-    print(f"[4] Số dư phuc123 sau GD:  {u2_after['available_balance']:,.0f} VNĐ (Ban đầu: 10,000,000 VNĐ)")
+    u1_final = float(u1_after["available_balance"])
+    u2_final = float(u2_after["available_balance"])
+
+    print(f"[4] Số dư khiem123 sau GD: {u1_final:,.0f} VNĐ (Ban đầu: {u1_before:,.0f} VNĐ)")
+    print(f"[4] Số dư phuc123 sau GD:  {u2_final:,.0f} VNĐ (Ban đầu: {u2_before:,.0f} VNĐ)")
     print(f"[4] Trạng thái học phí 524K0011: {hp_after['TrangThai']}")
 
-    total_deducted = (20000000.0 - u1_after["available_balance"]) + (10000000.0 - u2_after["available_balance"])
+    total_deducted = (u1_before - u1_final) + (u2_before - u2_final)
     assert success_count == 1 and failed_count == 1, "LỖI CONCURRENCY: Phải có đúng 1 người đóng thành công!"
-    assert total_deducted == 7500000.0, f"LỖI CONCURRENCY: Tổng số tiền bị trừ ({total_deducted}) không đúng bằng 1 lần học phí!"
+    assert abs(total_deducted - tuition_amount) < 1.0, (
+        f"LỖI CONCURRENCY: Tổng số tiền bị trừ ({total_deducted:,.0f}) không đúng bằng 1 lần học phí ({tuition_amount:,.0f})!"
+    )
     assert hp_after["TrangThai"] == "DA_DONG", "Trạng thái học phí phải là DA_DONG!"
-    print("[✓] KẾT LUẬN TÌNH HUỐNG 2: PASS! Khoản học phí chỉ được thanh toán thành công đúng 1 lần.")
+    print("[PASS] KẾT LUẬN TÌNH HUỐNG 2: Khoản học phí chỉ được thanh toán thành công đúng 1 lần.")
 
 
 if __name__ == "__main__":
     test_scenario_1_same_account_concurrent_payments()
     test_scenario_2_multiple_accounts_same_tuition()
     reset_data()
-    print("\n🎉 TẤT CẢ KỊCH BẢN CONCURRENCY & TRANSACTION ĐỀU VƯỢT QUA THÀNH CÔNG!")
-
+    print("\n[SUCCESS] TẤT CẢ KỊCH BẢN CONCURRENCY & TRANSACTION ĐỀU VƯỢT QUA THÀNH CÔNG!")

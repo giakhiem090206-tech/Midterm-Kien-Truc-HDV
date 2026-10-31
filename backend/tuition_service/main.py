@@ -29,10 +29,10 @@ def ensure_seed_tuitions():
     try:
         if db.query(HocPhiModel).count() == 0:
             db.add_all([
-                HocPhiModel(mssv="524K0011", ho_ten_sinh_vien="Nguyễn Gia Phúc", hoc_ky="HK1-2026-2027", so_tien_phai_nop=7500000.00, trang_thai="CHUA_DONG"),
-                HocPhiModel(mssv="523V0005", ho_ten_sinh_vien="Hồng Bảo Nhi", hoc_ky="HK1-2026-2027", so_tien_phai_nop=8000000.00, trang_thai="CHUA_DONG"),
-                HocPhiModel(mssv="524K0006", ho_ten_sinh_vien="Thân Vũ Gia Khiêm", hoc_ky="HK1-2026-2027", so_tien_phai_nop=8500000.00, trang_thai="DA_DONG"),
-                HocPhiModel(mssv="524V0007", ho_ten_sinh_vien="Phan Nguyễn Thảo Như", hoc_ky="HK1-2026-2027", so_tien_phai_nop=1500000.00, trang_thai="CHUA_DONG"),
+                HocPhiModel(mssv="524K0011", ho_ten_sinh_vien="Nguyễn Gia Phúc", hoc_ky="HK1-2026-2027", so_tien_phai_nop=5300000.00, trang_thai="CHUA_DONG"),
+                HocPhiModel(mssv="523V0005", ho_ten_sinh_vien="Hồng Bảo Nhi", hoc_ky="HK1-2026-2027", so_tien_phai_nop=5300000.00, trang_thai="CHUA_DONG"),
+                HocPhiModel(mssv="524K0006", ho_ten_sinh_vien="Thân Vũ Gia Khiêm", hoc_ky="HK1-2026-2027", so_tien_phai_nop=5300000.00, trang_thai="DA_DONG"),
+                HocPhiModel(mssv="524V0007", ho_ten_sinh_vien="Phan Nguyễn Thảo Như", hoc_ky="HK1-2026-2027", so_tien_phai_nop=5300000.00, trang_thai="CHUA_DONG"),
             ])
             db.commit()
     except Exception:

@@ -51,6 +51,7 @@ services:
       - "8003:8003"
     volumes:
       - ./backend/payment_service:/app
+      - ./test_concurrency.py:/app/test_concurrency.py
     env_file:
       - .env
     environment:

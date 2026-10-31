@@ -573,11 +573,12 @@ def reset_demo_data(db: Session = Depends(get_db)):
         db.query(XacThucOTPModel).delete()
         db.query(GiaoDichModel).delete()
 
-        # Khôi phục số dư 3 tài khoản mẫu
+        # Khôi phục số dư các tài khoản mẫu khớp với init.sql
         balances = {
-            "khiem123": 20000000.00,
+            "khiem123": 10000000.00,
             "phuc123": 10000000.00,
-            "nhi123": 2000000.00,
+            "nhi123": 10000000.00,
+            "nhu123": 10000000.00,
         }
         for username, bal in balances.items():
             user = db.query(UserModel).filter(UserModel.ten_dang_nhap == username).first()
