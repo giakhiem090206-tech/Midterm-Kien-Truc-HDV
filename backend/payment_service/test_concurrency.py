@@ -167,9 +167,37 @@ def test_scenario_2_multiple_accounts_same_tuition():
     print("[PASS] KẾT LUẬN TÌNH HUỐNG 2: Khoản học phí chỉ được thanh toán thành công đúng 1 lần.")
 
 
+def test_scenario_3_idempotency_key_and_webhook():
+    print_banner("TEST TÌNH HUỐNG 3: IDEMPOTENCY-KEY (IK) & WEBHOOK CALLBACK")
+    reset_data()
+
+    _, u1 = http_request("POST", f"{AUTH_URL}/api/v1/auth/login", {"username": "khiem123", "password": "123456"})
+    user_id = u1["MaNguoiDung"]
+    _, hp = http_request("GET", f"{TUITION_URL}/api/v1/tuitions/524V0007")
+
+    ik_header = {"Idempotency-Key": "IK_DEMO_TEST_001"}
+    s1, r1 = http_request("POST", f"{PAYMENT_URL}/api/v1/payments/initiate", {"MaNguoiDung": user_id, "MaHocPhi": hp["MaHocPhi"]}, headers=ik_header)
+    s2, r2 = http_request("POST", f"{PAYMENT_URL}/api/v1/payments/initiate", {"MaNguoiDung": user_id, "MaHocPhi": hp["MaHocPhi"]}, headers=ik_header)
+
+    print(f"[1] Lần gửi 1 (IK=IK_DEMO_TEST_001): MaGiaoDich={r1['MaGiaoDich']} | idempotent_replay={r1.get('idempotent_replay')}")
+    print(f"[2] Lần gửi 2 (Cùng IK):             MaGiaoDich={r2['MaGiaoDich']} | idempotent_replay={r2.get('idempotent_replay')}")
+
+    assert r1["MaGiaoDich"] == r2["MaGiaoDich"], "LỖI IDEMPOTENCY: Cùng Idempotency-Key nhưng sinh ra 2 giao dịch khác nhau!"
+    assert r2.get("idempotent_replay") is True, "LỖI IDEMPOTENCY: Lần gọi lại phải đánh dấu idempotent_replay = True!"
+
+    wh_ik = {"Idempotency-Key": "IK_WEBHOOK_001"}
+    _, wh1 = http_request("POST", f"{PAYMENT_URL}/api/v1/payments/webhook/callback", {"MaGiaoDich": r1["MaGiaoDich"]}, headers=wh_ik)
+    _, wh2 = http_request("POST", f"{PAYMENT_URL}/api/v1/payments/webhook/callback", {"MaGiaoDich": r1["MaGiaoDich"]}, headers=wh_ik)
+    print(f"[3] Webhook Callback lần 1: {wh1}")
+    print(f"[4] Webhook Callback lần 2 (Replay): {wh2}")
+    assert wh2.get("idempotent_replay") is True
+    print("[PASS] KẾT LUẬN TÌNH HUỐNG 3: Idempotency-Key (IK) & Webhook Callback hoạt động chính xác!")
+
+
 if __name__ == "__main__":
     test_scenario_1_same_account_concurrent_payments()
     test_scenario_2_multiple_accounts_same_tuition()
+    test_scenario_3_idempotency_key_and_webhook()
     reset_data()
-    print("\n[SUCCESS] TẤT CẢ KỊCH BẢN CONCURRENCY & TRANSACTION ĐỀU VƯỢT QUA THÀNH CÔNG!")
+    print("\n[SUCCESS] TẤT CẢ KỊCH BẢN CONCURRENCY, TRANSACTION & IDEMPOTENCY-KEY ĐỀU VƯỢT QUA THÀNH CÔNG!")
 

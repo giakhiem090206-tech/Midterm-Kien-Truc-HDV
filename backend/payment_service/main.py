@@ -3,13 +3,14 @@ import random
 import smtplib
 from email.message import EmailMessage
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Optional, Dict, Any
 import httpx
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import FastAPI, Depends, HTTPException, status, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from sqlalchemy import Column, Integer, String, Numeric, DateTime, create_engine
 from sqlalchemy.orm import declarative_base, Session, sessionmaker
+from adapters import get_notification_adapter
 
 # 1. Cấu hình Database & Endpoint của các Microservices khác
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://root:rootpassword@db:5432/ibanking")
@@ -73,49 +74,15 @@ def get_db():
     finally:
         db.close()
 
+# Bộ nhớ lưu trữ Idempotency-Key (IK) chống xử lý trùng lặp khi mạng retry / người dùng bấm đúp
+IDEMPOTENCY_STORE: Dict[str, Dict[str, Any]] = {}
+
 def send_email_notification(to_email: str, subject: str, body_text: str, html_body: Optional[str] = None) -> bool:
     """
-    Hàm gửi email thật qua Gmail SMTP (smtp.gmail.com:587).
-    Tự động chuẩn hóa App Password 16 ký tự của Google và hỗ trợ định dạng HTML chuyên nghiệp.
+    Gửi thông báo qua tầng Adapter (NotificationAdapter -> GmailSMTPAdapter / ConsoleMailAdapter).
     """
-    smtp_host = (os.getenv("SMTP_HOST") or "smtp.gmail.com").strip()
-    smtp_port = int((os.getenv("SMTP_PORT") or "587").strip())
-    smtp_user = (os.getenv("SMTP_USER") or "giaphucnguyen36573@gmail.com").strip()
-    if "nhap_gmail" in smtp_user or not smtp_user:
-        smtp_user = "giaphucnguyen36573@gmail.com"
-
-    raw_pass = (os.getenv("SMTP_PASSWORD") or "perm vvkd sjxv msqr").replace(" ", "").strip()
-    if "xxxx" in raw_pass or not raw_pass:
-        raw_pass = "permvvkdsjxvmsqr"
-    smtp_password = raw_pass
-
-    print("\n" + "=" * 65)
-    print(f"[GMAIL SMTP] To: {to_email} | From: {smtp_user}")
-    print(f"[GMAIL SMTP] Subject: {subject}")
-    print("-" * 65)
-    print(body_text)
-    print("=" * 65 + "\n")
-
-    try:
-        msg = EmailMessage()
-        msg["Subject"] = subject
-        msg["From"] = f"TDTU iBanking <{smtp_user}>"
-        msg["To"] = to_email
-        msg.set_content(body_text)
-        if html_body:
-            msg.add_alternative(html_body, subtype="html")
-
-        with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as server:
-            server.ehlo()
-            server.starttls()
-            server.ehlo()
-            server.login(smtp_user, smtp_password)
-            server.send_message(msg)
-        print(f"[GMAIL SMTP SUCCESS] Đã gửi email thật tới {to_email} thành công!")
-        return True
-    except Exception as e:
-        print(f"[GMAIL SMTP ERROR] Gửi email thất bại: {e}")
-        return False
+    adapter = get_notification_adapter()
+    return adapter.send(recipient=to_email, subject=subject, text_body=body_text, html_body=html_body)
 
 # 3. Khởi tạo FastAPI & CORS
 app = FastAPI(
@@ -145,6 +112,8 @@ class InitiatePaymentResponse(BaseModel):
     smtp_sent: bool = False
     expires_in_seconds: int = 300
     otp_demo: str
+    idempotency_key: Optional[str] = None
+    idempotent_replay: bool = False
     message: str
 
 class ConfirmPaymentRequest(BaseModel):
@@ -163,6 +132,13 @@ class TransactionResponse(BaseModel):
     student_name: Optional[str] = None
     semester: Optional[str] = None
     email_sent_to: Optional[str] = None
+    idempotency_key: Optional[str] = None
+    idempotent_replay: bool = False
+
+class WebhookCallbackRequest(BaseModel):
+    MaGiaoDich: str
+    event_type: str = "PAYMENT_CONFIRMED"
+    status: str = "SUCCESS"
 
 # 5. API Endpoints
 
@@ -174,15 +150,22 @@ class TransactionResponse(BaseModel):
 )
 async def initiate_payment(
     request: InitiatePaymentRequest,
+    idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
     db: Session = Depends(get_db)
 ):
     """
-    Bước 1: Khởi tạo giao dịch thanh toán học phí.
+    Bước 1: Khởi tạo giao dịch thanh toán học phí (Hỗ trợ Idempotency-Key chống tạo giao dịch trùng).
     - Giao tiếp với Auth Service kiểm tra thông tin người nộp & số dư khả dụng.
     - Giao tiếp với Tuition Service kiểm tra khoản học phí tồn tại và chưa được thanh toán.
     - Sinh mã OTP 6 chữ số (gắn với giao dịch, không trùng với OTP đang có hiệu lực, hạn 5 phút, dùng 1 lần).
-    - Gửi mã OTP qua email đến địa chỉ email của người nộp tiền.
+    - Gửi mã OTP qua Adapter tới địa chỉ email.
     """
+    if idempotency_key:
+        ik_cache_key = f"INITIATE:{idempotency_key.strip()}"
+        if ik_cache_key in IDEMPOTENCY_STORE:
+            cached_resp = dict(IDEMPOTENCY_STORE[ik_cache_key])
+            cached_resp["idempotent_replay"] = True
+            return cached_resp
     async with httpx.AsyncClient(timeout=10.0) as client:
         # Gọi Auth Service lấy thông tin người dùng & số dư
         user_res = await client.get(f"{AUTH_SERVICE_URL}/api/v1/users/{request.MaNguoiDung}")
@@ -310,15 +293,20 @@ async def initiate_payment(
         html_body=email_html
     )
 
-    return {
+    result_payload = {
         "transaction_id": ma_giao_dich,
         "MaGiaoDich": ma_giao_dich,
         "email": target_email,
         "smtp_sent": smtp_sent,
         "expires_in_seconds": 300,
         "otp_demo": ma_code,
+        "idempotency_key": idempotency_key,
+        "idempotent_replay": False,
         "message": f"Mã OTP đã được gửi đến địa chỉ {target_email}. Hiệu lực trong 5 phút."
     }
+    if idempotency_key:
+        IDEMPOTENCY_STORE[f"INITIATE:{idempotency_key.strip()}"] = result_payload
+    return result_payload
 
 @app.get("/api/v1/payments/qr/{transaction_id}", tags=["Payment"])
 def get_payment_qr(transaction_id: str, db: Session = Depends(get_db)):
@@ -338,16 +326,19 @@ def get_payment_qr(transaction_id: str, db: Session = Depends(get_db)):
 @app.post("/api/v1/payments/confirm", response_model=TransactionResponse, tags=["Payment"])
 async def confirm_payment(
     request: ConfirmPaymentRequest,
+    idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
     db: Session = Depends(get_db)
 ):
     """
-    Bước 2: Xác thực OTP và xử lý giao dịch thành công (Đảm bảo ACID & Concurrency).
-    - Kiểm tra OTP hợp lệ, đúng giao dịch, còn thời hạn 5 phút và chỉ dùng 1 lần.
-    - Áp dụng Pessimistic Locking (SELECT ... FOR UPDATE) trên dòng người dùng và khoản học phí:
-      1. Chống âm số dư khi có nhiều giao dịch đồng thời trên cùng một tài khoản.
-      2. Chống thanh toán trùng khi có nhiều tài khoản cùng thanh toán một khoản học phí.
-    - Trừ số dư tài khoản, cập nhật học phí thành DA_DONG, lưu lịch sử giao dịch và gửi email xác nhận.
+    Bước 2: Xác thực OTP và xử lý giao dịch thành công (Đảm bảo ACID, Concurrency & Idempotency-Key).
     """
+    if idempotency_key:
+        ik_cache_key = f"CONFIRM:{idempotency_key.strip()}"
+        if ik_cache_key in IDEMPOTENCY_STORE:
+            cached_resp = dict(IDEMPOTENCY_STORE[ik_cache_key])
+            cached_resp["idempotent_replay"] = True
+            return cached_resp
+
     now = datetime.utcnow()
 
     try:
@@ -516,7 +507,7 @@ async def confirm_payment(
             html_body=confirm_email_html
         )
 
-        return {
+        confirm_payload = {
             "message": "Thanh toán học phí thành công! Email xác nhận đã được gửi.",
             "transaction_id": request.MaGiaoDich,
             "MaGiaoDich": request.MaGiaoDich,
@@ -526,8 +517,13 @@ async def confirm_payment(
             "mssv": student_mssv,
             "student_name": student_name,
             "semester": semester,
-            "email_sent_to": user_email
+            "email_sent_to": user_email,
+            "idempotency_key": idempotency_key,
+            "idempotent_replay": False
         }
+        if idempotency_key:
+            IDEMPOTENCY_STORE[f"CONFIRM:{idempotency_key.strip()}"] = confirm_payload
+        return confirm_payload
 
     except HTTPException:
         raise
@@ -564,12 +560,44 @@ def get_payment_history(user_id: int, db: Session = Depends(get_db)):
         for gd, hp in results
     ]
 
+@app.post("/api/v1/payments/webhook/callback", tags=["Webhook & Idempotency"])
+def payment_webhook_callback(
+    payload: WebhookCallbackRequest,
+    idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
+    db: Session = Depends(get_db)
+):
+    """
+    Webhook Callback nhận thông báo trạng thái giao dịch (A -> B kèm Idempotency-Key).
+    Đảm bảo nếu đối tác gửi lại callback nhiều lần với cùng Idempotency-Key thì hệ thống chỉ xử lý 1 lần.
+    """
+    ik = (idempotency_key or f"WH_{payload.MaGiaoDich}_{payload.event_type}").strip()
+    cache_key = f"WEBHOOK:{ik}"
+    if cache_key in IDEMPOTENCY_STORE:
+        cached = dict(IDEMPOTENCY_STORE[cache_key])
+        cached["idempotent_replay"] = True
+        return cached
+
+    gd = db.query(GiaoDichModel).filter(GiaoDichModel.ma_giao_dich == payload.MaGiaoDich).first()
+    if not gd:
+        raise HTTPException(status_code=404, detail="Không tìm thấy giao dịch cho Webhook Callback")
+
+    resp = {
+        "webhook_status": "ACKNOWLEDGED",
+        "MaGiaoDich": gd.ma_giao_dich,
+        "transaction_status": gd.trang_thai,
+        "idempotency_key": ik,
+        "idempotent_replay": False
+    }
+    IDEMPOTENCY_STORE[cache_key] = resp
+    return resp
+
 @app.post("/api/v1/payments/demo/reset", tags=["Demo & Testing"])
 def reset_demo_data(db: Session = Depends(get_db)):
     """
     Khôi phục dữ liệu mẫu về trạng thái ban đầu để hỗ trợ chạy Concurrency Test & Demo nhiều lần trước Giảng viên.
     """
     try:
+        IDEMPOTENCY_STORE.clear()
         db.query(XacThucOTPModel).delete()
         db.query(GiaoDichModel).delete()
 

@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Xác thực OTP & Thanh toán - TDTU iBanking</title>
     <link rel="stylesheet" href="style.css">
+    <script src="config.js"></script>
 </head>
 <body>
     <nav class="navbar">
@@ -227,9 +228,15 @@
             btn.innerText = "Đang khởi tạo giao dịch & gửi OTP...";
 
             try {
+                const initIK = sessionStorage.getItem('current_Init_IK') || (window.IBANKING_CONFIG ? window.IBANKING_CONFIG.generateIdempotencyKey('IK_INIT') : `IK_INIT_${Date.now()}`);
+                sessionStorage.setItem('current_Init_IK', initIK);
+
                 const res = await fetch('http://localhost:8003/api/v1/payments/initiate', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Idempotency-Key': initIK
+                    },
                     body: JSON.stringify({
                         MaNguoiDung: MaNguoiDung,
                         MaHocPhi: MaHocPhi,
@@ -291,9 +298,15 @@
             btn.innerText = "Đang xử lý giao dịch...";
 
             try {
+                const confirmIK = sessionStorage.getItem('current_Confirm_IK') || `IK_CONFIRM_${MaGiaoDich}`;
+                sessionStorage.setItem('current_Confirm_IK', confirmIK);
+
                 const res = await fetch('http://localhost:8003/api/v1/payments/confirm', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Idempotency-Key': confirmIK
+                    },
                     body: JSON.stringify({
                         MaGiaoDich: MaGiaoDich,
                         otp: otp,
@@ -327,6 +340,8 @@
                 showMsg(data.message || "Thanh toán học phí thành công!", false);
 
                 sessionStorage.removeItem('current_MaGiaoDich');
+                sessionStorage.removeItem('current_Init_IK');
+                sessionStorage.removeItem('current_Confirm_IK');
                 sessionStorage.removeItem('pay_MaHocPhi');
             } catch (err) {
                 console.error(err);
