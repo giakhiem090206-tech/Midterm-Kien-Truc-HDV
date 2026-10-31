@@ -29,6 +29,11 @@
     </div>
 
 <script>
+    const token = sessionStorage.getItem('token');
+    if (!token) {
+        window.location.href = 'login.html';
+    }
+
     async function loadHistory() {
         const MaNguoiDung = sessionStorage.getItem('MaNguoiDung');
         const body = document.getElementById('history-body');
@@ -53,16 +58,22 @@
                 return;
             }
 
-            body.innerHTML = data.map(g => `
-                <tr style="border-bottom: 1px solid #eee;">
-                    <td style="padding: 8px;">${g.MaGiaoDich}</td>
-                    <td style="padding: 8px;">${Number(g.SoTienGiaoDich).toLocaleString('vi-VN')} VNĐ</td>
-                    <td style="padding: 8px;">${new Date(g.NgayGiaoDich).toLocaleString('vi-VN')}</td>
-                    <td style="padding: 8px; font-weight: bold; color: ${g.TrangThai === 'SUCCESS' ? 'green' : (g.TrangThai === 'PENDING' ? 'orange' : 'red')}">
-                        ${g.TrangThai}
-                    </td>
-                </tr>
-            `).join('');
+            body.innerHTML = data.map(g => {
+                const amount = Number(g.SoTienGiaoDich ?? g.SoTien ?? 0);
+                const dateValue = g.NgayGiaoDich ?? g.ThoiGian ?? null;
+                const dateText = dateValue ? new Date(dateValue).toLocaleString('vi-VN') : 'N/A';
+
+                return `
+                    <tr style="border-bottom: 1px solid #eee;">
+                        <td style="padding: 8px;">${g.MaGiaoDich}</td>
+                        <td style="padding: 8px;">${Number.isFinite(amount) ? amount.toLocaleString('vi-VN') : '0'} VNĐ</td>
+                        <td style="padding: 8px;">${dateText}</td>
+                        <td style="padding: 8px; font-weight: bold; color: ${g.TrangThai === 'SUCCESS' ? 'green' : (g.TrangThai === 'PENDING' ? 'orange' : 'red')}">
+                            ${g.TrangThai}
+                        </td>
+                    </tr>
+                `;
+            }).join('');
         } catch (error) {
             console.error(error);
             body.innerHTML = `<tr><td colspan="4" style="text-align: center; padding: 12px; color: red;">Lỗi kết nối tới Payment Service!</td></tr>`;

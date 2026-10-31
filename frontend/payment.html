@@ -25,13 +25,25 @@
                     <span class="label">Số tiền:</span>
                     <span class="value" style="font-size: 20px;"><span id="display-amount"></span> VNĐ</span>
                 </div>
-                <button onclick="initPayment()" class="btn-primary">Nhận mã xác thực OTP</button>
+                <button onclick="initPayment()" class="btn-primary">Khởi tạo giao dịch</button>
+            </div>
+
+            <div id="qr-section" style="display: none; text-align: center;">
+                <div class="qr-panel">
+                    <div class="qr-title">Quét mã QR để thanh toán</div>
+                    <div id="qr-code" class="qr-code"></div>
+                    <div class="qr-meta">
+                        <div><strong>Mã GD:</strong> <span id="qr-transaction-id"></span></div>
+                        <div><strong>Số tiền:</strong> <span id="qr-amount"></span> VNĐ</div>
+                    </div>
+                    <button onclick="showOtpStep()" class="btn-primary">Tôi đã quét xong</button>
+                </div>
             </div>
 
             <div id="otp-section" style="display: none;">
                 <div class="form-group" style="text-align: center; margin-top: 10px;">
                     <label style="color: var(--success-green); font-size: 15px; margin-bottom: 15px;">
-                        ✓ Mã OTP đã được tạo. Hiệu lực trong 5 phút.
+                        ✓ Mã OTP đã được gửi tới email. Hiệu lực trong 5 phút.
                     </label>
                     <input type="text" id="otpCode" class="form-control" placeholder="Nhập mã OTP" style="text-align: center; font-size: 20px; letter-spacing: 5px;" required>
                 </div>
@@ -41,6 +53,11 @@
     </div>
 
     <script>
+        const token = sessionStorage.getItem('token');
+        if (!token) {
+            window.location.href = 'login.html';
+        }
+
         document.getElementById('display-mssv').innerText = sessionStorage.getItem('pay_MSSV') || '';
         const amount = sessionStorage.getItem('pay_Amount');
         document.getElementById('display-amount').innerText = amount ? Number(amount).toLocaleString('vi-VN') : '0';
@@ -50,6 +67,24 @@
             msgBox.innerText = text;
             msgBox.className = isError ? 'alert alert-error' : 'alert alert-success';
             msgBox.style.display = 'block';
+        }
+
+        function buildFakeQR(data) {
+            const size = 9;
+            const seed = [...data].reduce((sum, ch) => sum + ch.charCodeAt(0), 0);
+            const cells = [];
+
+            for (let y = 0; y < size; y++) {
+                for (let x = 0; x < size; x++) {
+                    const pattern = ((seed + x * 17 + y * 13) % 7);
+                    const isLight = pattern === 0 || pattern === 3 || pattern === 5;
+                    cells.push(isLight ? 'q-light' : 'q-dark');
+                }
+            }
+
+            return `<div class="qr-grid" style="grid-template-columns: repeat(${size}, 10px);">
+                ${cells.map(cell => `<span class="${cell}"></span>`).join('')}
+            </div>`;
         }
 
         async function initPayment() {
@@ -64,7 +99,6 @@
             }
 
             try {
-                // Đổi port 3000 -> 8003 (Payment Service)
                 const res = await fetch('http://localhost:8003/api/v1/payments/initiate', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -72,21 +106,42 @@
                 });
 
                 const data = await res.json();
-                
+
                 if (!res.ok) {
                     return showMsg(data.detail || data.error || "Không thể khởi tạo giao dịch", true);
                 }
 
-                // Lưu mã giao dịch nhận từ Payment Service
-                sessionStorage.setItem('current_MaGiaoDich', data.MaGiaoDich || data.transaction_id);
-                
+                const transactionId = data.MaGiaoDich || data.transaction_id;
+                sessionStorage.setItem('current_MaGiaoDich', transactionId);
+
                 document.getElementById('init-section').style.display = 'none';
-                document.getElementById('otp-section').style.display = 'block';
-                showMsg(data.message || "Đã gửi mã OTP xác nhận!", false);
+                document.getElementById('qr-section').style.display = 'block';
+                document.getElementById('qr-transaction-id').innerText = transactionId;
+                document.getElementById('qr-amount').innerText = Number(sessionStorage.getItem('pay_Amount') || 0).toLocaleString('vi-VN');
+
+                try {
+                    const qrRes = await fetch(`http://localhost:8003/api/v1/payments/qr/${transactionId}`);
+                    const qrData = await qrRes.json();
+                    if (qrRes.ok) {
+                        document.getElementById('qr-code').innerHTML = buildFakeQR(qrData.qr_data || transactionId);
+                    } else {
+                        document.getElementById('qr-code').innerHTML = buildFakeQR(transactionId);
+                    }
+                } catch {
+                    document.getElementById('qr-code').innerHTML = buildFakeQR(transactionId);
+                }
+
+                showMsg("Vui lòng quét mã QR để hoàn tất thanh toán rồi nhập OTP.", false);
             } catch (err) {
                 console.error(err);
                 showMsg("Lỗi kết nối tới Payment Service (Port 8003)!", true);
             }
+        }
+
+        function showOtpStep() {
+            document.getElementById('qr-section').style.display = 'none';
+            document.getElementById('otp-section').style.display = 'block';
+            showMsg("Mã OTP đã được gửi tới email của bạn. Vui lòng nhập để xác nhận thanh toán.", false);
         }
 
         async function confirmPayment() {

@@ -58,6 +58,11 @@
     </div>
 
     <script>
+        const token = sessionStorage.getItem('token');
+        if (!token) {
+            window.location.href = 'login.html';
+        }
+
         const hoTenNguoiNop = sessionStorage.getItem('HoTenNguoiNop');
         document.getElementById('nav-user-name').innerText = hoTenNguoiNop || 'Khách';
 
@@ -66,7 +71,7 @@
         });
 
         async function lookupTuition() {
-            const mssv = document.getElementById('mssvSearch').value.trim();
+            const mssv = document.getElementById('mssvSearch').value.trim().toUpperCase();
             const notFoundMsg = document.getElementById('not-found-msg');
             const tuitionInfo = document.getElementById('tuition-info');
 

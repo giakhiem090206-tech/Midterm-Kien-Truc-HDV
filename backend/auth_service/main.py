@@ -1,5 +1,6 @@
 import os
-from fastapi import FastAPI, Depends, HTTPException, status
+from typing import Optional
+from fastapi import FastAPI, Depends, HTTPException, status, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy import Column, Integer, String, Numeric, create_engine
@@ -57,6 +58,11 @@ class UserProfileResponse(BaseModel):
     email: str
     available_balance: float
 
+class ValidateTokenResponse(BaseModel):
+    valid: bool
+    user_id: Optional[int] = None
+    full_name: Optional[str] = None
+
 class DeductBalanceRequest(BaseModel):
     amount: float
 
@@ -69,18 +75,44 @@ def login(request: LoginRequest, db: Session = Depends(get_db)):
         UserModel.TenDangNhap == request.username,
         UserModel.MatKhau == request.password
     ).first()
-    
+
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Sai tên đăng nhập hoặc mật khẩu"
         )
-    
+
+    token = f"mock_jwt_token_{user.MaNguoiDung}_{user.TenDangNhap}"
     return {
-        "access_token": f"mock_jwt_token_{user.MaNguoiDung}",
+        "access_token": token,
         "token_type": "bearer",
         "MaNguoiDung": user.MaNguoiDung,
         "HoTen": user.HoTen
+    }
+
+@app.get("/api/v1/auth/validate", response_model=ValidateTokenResponse, tags=["Auth"])
+def validate_token(authorization: Optional[str] = Header(default=None, alias="Authorization"), db: Session = Depends(get_db)):
+    """Xác thực giả lập JWT để frontend có thể kiểm tra trạng thái login."""
+    if not authorization or not authorization.startswith("Bearer "):
+        return {"valid": False}
+
+    token = authorization.replace("Bearer ", "", 1)
+    if not token or "mock_jwt_token_" not in token:
+        return {"valid": False}
+
+    user_id = token.split("mock_jwt_token_")[-1].split("_")[0]
+    try:
+        user = db.query(UserModel).filter(UserModel.MaNguoiDung == int(user_id)).first()
+    except ValueError:
+        return {"valid": False}
+
+    if not user:
+        return {"valid": False}
+
+    return {
+        "valid": True,
+        "user_id": user.MaNguoiDung,
+        "full_name": user.HoTen
     }
 
 @app.get("/api/v1/users/me", response_model=UserProfileResponse, tags=["User"])

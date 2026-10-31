@@ -1,4 +1,5 @@
 import os
+import random
 from datetime import datetime, timedelta
 import httpx
 from fastapi import FastAPI, Depends, HTTPException, status
@@ -115,6 +116,19 @@ async def initiate_payment(
 
     # Tạo giao dịch PENDING
     ma_giao_dich = f"TXN_{int(datetime.utcnow().timestamp())}"
+
+    # Chống payment trùng: nếu đã có giao dịch thành công cho cùng user + hocphi, từ chối
+    existing = db.query(GiaoDichModel).filter(
+        GiaoDichModel.MaNguoiDung == request.MaNguoiDung,
+        GiaoDichModel.MaHocPhi == request.MaHocPhi,
+        GiaoDichModel.TrangThai.in_(["PENDING", "SUCCESS"])
+    ).first()
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Khoản học phí này đã có giao dịch đang xử lý hoặc đã hoàn tất."
+        )
+
     gd = GiaoDichModel(
         MaGiaoDich=ma_giao_dich,
         MaNguoiDung=request.MaNguoiDung,
@@ -125,8 +139,8 @@ async def initiate_payment(
     )
     db.add(gd)
 
-    # Sinh OTP 6 số (mặc định 123456 cho demo, hết hạn trong 5 phút)
-    ma_code = "123456"
+    # Sinh OTP 6 số ngẫu nhiên, hết hạn trong 5 phút
+    ma_code = f"{random.randint(100000, 999999)}"
     otp = XacThucOTPModel(
         MaGiaoDich=ma_giao_dich,
         MaCode=ma_code,
@@ -142,6 +156,21 @@ async def initiate_payment(
     return {
         "transaction_id": ma_giao_dich,
         "message": "OTP đã được gửi đến email của bạn."
+    }
+
+@app.get("/api/v1/payments/qr/{transaction_id}", tags=["Payment"])
+def get_payment_qr(transaction_id: str, db: Session = Depends(get_db)):
+    """Trả về dữ liệu QR giả lập cho thao tác quét QR của người dùng."""
+    gd = db.query(GiaoDichModel).filter(GiaoDichModel.MaGiaoDich == transaction_id).first()
+    if not gd:
+        raise HTTPException(status_code=404, detail="Không tìm thấy giao dịch")
+
+    qr_data = f"IBANKING|{transaction_id}|{gd.MaNguoiDung}|{float(gd.SoTienGiaoDich)}|TDTU"
+    return {
+        "transaction_id": transaction_id,
+        "amount": float(gd.SoTienGiaoDich),
+        "merchant": "TDTU iBanking",
+        "qr_data": qr_data
     }
 
 @app.post("/api/v1/payments/confirm", response_model=TransactionResponse, tags=["Payment"])
@@ -170,7 +199,10 @@ async def confirm_payment(
     gd = db.query(GiaoDichModel).filter(GiaoDichModel.MaGiaoDich == request.MaGiaoDich).first()
     if not gd:
         raise HTTPException(status_code=404, detail="Không tìm thấy giao dịch")
-    
+
+    if gd.TrangThai == "SUCCESS":
+        raise HTTPException(status_code=400, detail="Giao dịch này đã được xác nhận trước đó")
+
     gd.TrangThai = "SUCCESS"
 
     # Trừ tiền người dùng và gạch nợ học phí
@@ -231,12 +263,12 @@ def get_payment_history(user_id: int, db: Session = Depends(get_db)):
         .order_by(GiaoDichModel.NgayGiaoDich.desc())
         .all()
     )
-    
+
     return [
         {
             "MaGiaoDich": item.MaGiaoDich,
-            "SoTien": float(item.SoTienGiaoDich),
-            "ThoiGian": item.NgayGiaoDich.isoformat(),
+            "SoTienGiaoDich": float(item.SoTienGiaoDich),
+            "NgayGiaoDich": item.NgayGiaoDich.isoformat(),
             "TrangThai": item.TrangThai
         }
         for item in history

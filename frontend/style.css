@@ -65,3 +65,53 @@ body { background-color: var(--bg-color); color: var(--text-main); }
 .detail-row:last-child { border-bottom: none; }
 .detail-row .label { color: #666; font-weight: 500; }
 .detail-row .value { font-weight: bold; color: var(--primary-blue); }
+
+.qr-panel {
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 20px;
+    background: #fafcff;
+}
+
+.qr-title {
+    font-weight: 700;
+    font-size: 18px;
+    color: var(--primary-blue);
+    margin-bottom: 15px;
+}
+
+.qr-code {
+    display: flex;
+    justify-content: center;
+    margin: 15px 0;
+}
+
+.qr-grid {
+    display: grid;
+    gap: 2px;
+    padding: 10px;
+    background: #fff;
+    border: 3px solid #111;
+    border-radius: 10px;
+}
+
+.q-light {
+    width: 10px;
+    height: 10px;
+    background: #fff;
+    border-radius: 1px;
+}
+
+.q-dark {
+    width: 10px;
+    height: 10px;
+    background: #111;
+    border-radius: 1px;
+}
+
+.qr-meta {
+    font-size: 14px;
+    line-height: 1.8;
+    color: #333;
+    margin-bottom: 15px;
+}
