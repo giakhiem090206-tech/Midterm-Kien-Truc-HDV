@@ -1,32 +1,46 @@
 import os
+from typing import List
 from fastapi import FastAPI, Depends, HTTPException, status, Path
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from sqlalchemy import Column, Integer, String, Numeric, create_engine
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy import Column, Integer, String, Numeric, create_engine, func
+from sqlalchemy.orm import declarative_base, Session, sessionmaker
 
 # 1. Cấu hình Database
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://root:rootpassword@db:5432/ibanking")
-engine = create_engine(DATABASE_URL)
+engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-# 2. Database Models
-class SinhVienModel(Base):
-    __tablename__ = "SinhVien"
-    MSSV = Column(String(20), primary_key=True)
-    HoTen = Column(String(100), nullable=False)
-    Email = Column(String(100))
-    SoDienThoai = Column(String(20))
-
+# 2. Database Model "hoc_phi" (đồng bộ 100% với init.sql)
 class HocPhiModel(Base):
-    __tablename__ = "HocPhi"
-    MaHocPhi = Column(Integer, primary_key=True, index=True)
-    MSSV = Column(String(20), nullable=False)
-    HocKy = Column(String(50), nullable=False)
-    SoTienPhaiNop = Column(Numeric(15, 2), nullable=False)
-    TrangThai = Column(String(30), nullable=False)
+    __tablename__ = "hoc_phi"
+    ma_hoc_phi = Column(Integer, primary_key=True, index=True)
+    mssv = Column(String(20), unique=True, nullable=False, index=True)
+    ho_ten_sinh_vien = Column(String(100), nullable=False)
+    hoc_ky = Column(String(50), nullable=False)
+    so_tien_phai_nop = Column(Numeric(15, 2), nullable=False)
+    trang_thai = Column(String(30), nullable=False, default="CHUA_DONG")
+
+Base.metadata.create_all(bind=engine)
+
+def ensure_seed_tuitions():
+    db = SessionLocal()
+    try:
+        if db.query(HocPhiModel).count() == 0:
+            db.add_all([
+                HocPhiModel(mssv="524K0011", ho_ten_sinh_vien="Nguyễn Gia Phúc", hoc_ky="HK1-2026-2027", so_tien_phai_nop=7500000.00, trang_thai="CHUA_DONG"),
+                HocPhiModel(mssv="523V0005", ho_ten_sinh_vien="Hồng Bảo Nhi", hoc_ky="HK1-2026-2027", so_tien_phai_nop=8000000.00, trang_thai="CHUA_DONG"),
+                HocPhiModel(mssv="524K0006", ho_ten_sinh_vien="Thân Vũ Gia Khiêm", hoc_ky="HK1-2026-2027", so_tien_phai_nop=8500000.00, trang_thai="DA_DONG"),
+                HocPhiModel(mssv="524V0007", ho_ten_sinh_vien="Phan Nguyễn Thảo Như", hoc_ky="HK1-2026-2027", so_tien_phai_nop=1500000.00, trang_thai="CHUA_DONG"),
+            ])
+            db.commit()
+    except Exception:
+        db.rollback()
+    finally:
+        db.close()
+
+ensure_seed_tuitions()
 
 def get_db():
     db = SessionLocal()
@@ -36,7 +50,11 @@ def get_db():
         db.close()
 
 # 3. Khởi tạo FastAPI & CORS
-app = FastAPI(title="Tuition Service", version="1.0.0")
+app = FastAPI(
+    title="Tuition Service - TDTU iBanking",
+    description="Microservice quản lý thông tin sinh viên và tra cứu/gạch nợ học phí TDTU",
+    version="1.0.0"
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -55,7 +73,23 @@ class TuitionDetailResponse(BaseModel):
     SoTienPhaiNop: float
     TrangThai: str
 
+def format_tuition(hp: HocPhiModel) -> dict:
+    return {
+        "MaHocPhi": hp.ma_hoc_phi,
+        "MSSV": hp.mssv,
+        "HoTen": hp.ho_ten_sinh_vien,
+        "HocKy": hp.hoc_ky,
+        "SoTienPhaiNop": float(hp.so_tien_phai_nop),
+        "TrangThai": hp.trang_thai
+    }
+
 # 5. API Endpoints
+
+@app.get("/api/v1/tuitions", response_model=List[TuitionDetailResponse], tags=["Tuition Public"])
+def list_all_tuitions(db: Session = Depends(get_db)):
+    """Lấy danh sách toàn bộ học phí sinh viên (hỗ trợ kiểm tra nhanh dữ liệu)"""
+    records = db.query(HocPhiModel).order_by(HocPhiModel.mssv.asc()).all()
+    return [format_tuition(hp) for hp in records]
 
 @app.get("/api/v1/tuitions/{mssv}", response_model=TuitionDetailResponse, tags=["Tuition Public"])
 def lookup_tuition(
@@ -63,73 +97,76 @@ def lookup_tuition(
     db: Session = Depends(get_db)
 ):
     """
-    Tra cứu khoản học phí CHƯA_ĐÓNG của sinh viên theo MSSV (Dành cho Frontend)
+    Tra cứu thông tin sinh viên và khoản học phí theo MSSV.
+    Trả về 404 Not Found nếu không tìm thấy MSSV.
     """
-    sv = db.query(SinhVienModel).filter(SinhVienModel.MSSV == mssv).first()
-    if not sv:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Không tìm thấy sinh viên"
-        )
-
-    # Tìm khoản học phí chưa đóng
-    hp = db.query(HocPhiModel).filter(
-        HocPhiModel.MSSV == mssv,
-        HocPhiModel.TrangThai == "CHUA_DONG"
-    ).first()
+    clean_mssv = mssv.strip().upper()
+    hp = db.query(HocPhiModel).filter(func.upper(HocPhiModel.mssv) == clean_mssv).first()
 
     if not hp:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Sinh viên không có khoản học phí cần nộp hoặc đã đóng đủ"
+            detail=f"Không tìm thấy sinh viên với MSSV '{clean_mssv}'"
         )
 
-    return {
-        "MaHocPhi": hp.MaHocPhi,
-        "MSSV": sv.MSSV,
-        "HoTen": sv.HoTen,
-        "HocKy": hp.HocKy,
-        "SoTienPhaiNop": float(hp.SoTienPhaiNop),
-        "TrangThai": hp.TrangThai
-    }
+    return format_tuition(hp)
 
 @app.get("/api/v1/tuitions/detail/{ma_hoc_phi}", response_model=TuitionDetailResponse, tags=["Tuition Internal"])
 def get_tuition_by_id(ma_hoc_phi: int, db: Session = Depends(get_db)):
     """
     API nội bộ: Lấy chi tiết khoản học phí theo MaHocPhi (Cho Payment Service gọi)
     """
-    hp = db.query(HocPhiModel).filter(HocPhiModel.MaHocPhi == ma_hoc_phi).first()
+    hp = db.query(HocPhiModel).filter(HocPhiModel.ma_hoc_phi == ma_hoc_phi).first()
     if not hp:
-        raise HTTPException(status_code=404, detail="Không tìm thấy khoản học phí")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Không tìm thấy khoản học phí"
+        )
 
-    sv = db.query(SinhVienModel).filter(SinhVienModel.MSSV == hp.MSSV).first()
-    
-    return {
-        "MaHocPhi": hp.MaHocPhi,
-        "MSSV": hp.MSSV,
-        "HoTen": sv.HoTen if sv else "",
-        "HocKy": hp.HocKy,
-        "SoTienPhaiNop": float(hp.SoTienPhaiNop),
-        "TrangThai": hp.TrangThai
-    }
+    return format_tuition(hp)
 
 @app.post("/api/v1/tuitions/{ma_hoc_phi}/pay", tags=["Tuition Internal"])
 def mark_tuition_as_paid(ma_hoc_phi: int, db: Session = Depends(get_db)):
     """
-    API nội bộ: Được gọi bởi Payment Service để cập nhật gạch nợ học phí sang DA_DONG
+    API nội bộ: Được gọi bởi Payment Service để cập nhật gạch nợ học phí sang DA_DONG.
+    Áp dụng Pessimistic Locking (SELECT ... FOR UPDATE) để chống thanh toán trùng khi có nhiều request đồng thời.
     """
-    hp = db.query(HocPhiModel).filter(HocPhiModel.MaHocPhi == ma_hoc_phi).first()
-    if not hp:
-        raise HTTPException(status_code=404, detail="Khoản học phí không tồn tại")
-    
-    if hp.TrangThai == "DA_DONG":
-        raise HTTPException(status_code=400, detail="Khoản học phí này đã được đóng trước đó")
+    try:
+        hp = (
+            db.query(HocPhiModel)
+            .filter(HocPhiModel.ma_hoc_phi == ma_hoc_phi)
+            .with_for_update()
+            .first()
+        )
+        if not hp:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Khoản học phí không tồn tại"
+            )
 
-    hp.TrangThai = "DA_DONG"
-    db.commit()
+        if hp.trang_thai == "DA_DONG":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Khoản học phí này đã được đóng trước đó"
+            )
 
-    return {
-        "status": "SUCCESS",
-        "MaHocPhi": ma_hoc_phi,
-        "message": "Đã gạch nợ học phí thành công"
-    }
+        hp.trang_thai = "DA_DONG"
+        db.commit()
+        db.refresh(hp)
+
+        return {
+            "status": "SUCCESS",
+            "MaHocPhi": ma_hoc_phi,
+            "MSSV": hp.mssv,
+            "TrangThai": hp.trang_thai,
+            "message": "Đã gạch nợ học phí thành công"
+        }
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Lỗi khi gạch nợ học phí: {str(e)}"
+        )

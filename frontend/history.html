@@ -2,29 +2,37 @@
 <html lang="vi">
 <head>
     <meta charset="UTF-8">
-    <title>Lịch sử giao dịch</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lịch sử giao dịch - TDTU iBanking</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
     <nav class="navbar">
         <div class="brand">TDTU iBanking</div>
-        <div class="user-info"><a href="tuition.html">🔙 Quay lại</a></div>
+        <div class="user-info">
+            <a href="tuition.html">🔙 Quay lại Tra cứu & Thanh toán</a>
+            | <a href="login.html" onclick="sessionStorage.clear()">Đăng xuất</a>
+        </div>
     </nav>
 
     <div class="page-container">
-        <div class="banking-card" style="max-width: 700px;">
-            <h2>Lịch Sử Giao Dịch</h2>
-            <table style="width: 100%; border-collapse: collapse; margin-top: 10px;">
-                <thead>
-                    <tr style="background: #f1f1f1; text-align: left;">
-                        <th style="padding: 8px;">Mã GD</th>
-                        <th style="padding: 8px;">Số tiền</th>
-                        <th style="padding: 8px;">Ngày</th>
-                        <th style="padding: 8px;">Trạng thái</th>
-                    </tr>
-                </thead>
-                <tbody id="history-body"></tbody>
-            </table>
+        <div class="banking-card" style="max-width: 850px;">
+            <h2>Lịch Sử Giao Dịch Đã Thực Hiện</h2>
+            <div style="overflow-x: auto;">
+                <table style="width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 14px;">
+                    <thead>
+                        <tr style="background: #f1f4f9; text-align: left; border-bottom: 2px solid var(--border-color);">
+                            <th style="padding: 10px;">Mã Giao Dịch</th>
+                            <th style="padding: 10px;">MSSV & Sinh Viên</th>
+                            <th style="padding: 10px;">Học Kỳ</th>
+                            <th style="padding: 10px;">Số Tiền</th>
+                            <th style="padding: 10px;">Thời Gian</th>
+                            <th style="padding: 10px;">Trạng Thái</th>
+                        </tr>
+                    </thead>
+                    <tbody id="history-body"></tbody>
+                </table>
+            </div>
         </div>
     </div>
 
@@ -39,14 +47,12 @@
         const body = document.getElementById('history-body');
 
         if (!MaNguoiDung) {
-            body.innerHTML = `<tr><td colspan="4" style="text-align: center; padding: 12px; color: red;">Vui lòng đăng nhập để xem lịch sử!</td></tr>`;
+            body.innerHTML = `<tr><td colspan="6" style="text-align: center; padding: 14px; color: red;">Vui lòng đăng nhập để xem lịch sử!</td></tr>`;
             return;
         }
 
         try {
-
             const res = await fetch(`http://localhost:8003/api/v1/payments/history/${MaNguoiDung}`);
-            
             if (!res.ok) {
                 throw new Error('Không thể tải lịch sử giao dịch');
             }
@@ -54,7 +60,7 @@
             const data = await res.json();
 
             if (!Array.isArray(data) || data.length === 0) {
-                body.innerHTML = `<tr><td colspan="4" style="text-align: center; padding: 12px;">Chưa có lịch sử giao dịch nào.</td></tr>`;
+                body.innerHTML = `<tr><td colspan="6" style="text-align: center; padding: 16px; color: #666;">Chưa có lịch sử giao dịch nào.</td></tr>`;
                 return;
             }
 
@@ -62,21 +68,22 @@
                 const amount = Number(g.SoTienGiaoDich ?? g.SoTien ?? 0);
                 const dateValue = g.NgayGiaoDich ?? g.ThoiGian ?? null;
                 const dateText = dateValue ? new Date(dateValue).toLocaleString('vi-VN') : 'N/A';
+                const statusColor = g.TrangThai === 'SUCCESS' ? 'var(--success-green)' : (g.TrangThai === 'PENDING' ? '#e67e22' : 'var(--error-red)');
 
                 return `
                     <tr style="border-bottom: 1px solid #eee;">
-                        <td style="padding: 8px;">${g.MaGiaoDich}</td>
-                        <td style="padding: 8px;">${Number.isFinite(amount) ? amount.toLocaleString('vi-VN') : '0'} VNĐ</td>
-                        <td style="padding: 8px;">${dateText}</td>
-                        <td style="padding: 8px; font-weight: bold; color: ${g.TrangThai === 'SUCCESS' ? 'green' : (g.TrangThai === 'PENDING' ? 'orange' : 'red')}">
-                            ${g.TrangThai}
-                        </td>
+                        <td style="padding: 10px; font-family: monospace; font-weight: 600;">${g.MaGiaoDich}</td>
+                        <td style="padding: 10px;"><strong>${g.MSSV || ''}</strong> - ${g.HoTenSinhVien || ''}</td>
+                        <td style="padding: 10px;">${g.HocKy || ''}</td>
+                        <td style="padding: 10px; font-weight: bold;">${Number.isFinite(amount) ? amount.toLocaleString('vi-VN') : '0'} VNĐ</td>
+                        <td style="padding: 10px;">${dateText}</td>
+                        <td style="padding: 10px; font-weight: bold; color: ${statusColor};">${g.TrangThai}</td>
                     </tr>
                 `;
             }).join('');
         } catch (error) {
             console.error(error);
-            body.innerHTML = `<tr><td colspan="4" style="text-align: center; padding: 12px; color: red;">Lỗi kết nối tới Payment Service!</td></tr>`;
+            body.innerHTML = `<tr><td colspan="6" style="text-align: center; padding: 14px; color: red;">Lỗi kết nối tới Payment Service (Port 8003)!</td></tr>`;
         }
     }
 

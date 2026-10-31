@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="refresh" content="0; url=login.html">
+    <title>TDTU iBanking - Hệ thống thanh toán học phí</title>
+    <script>
+        const token = sessionStorage.getItem('token');
+        if (token) {
+            window.location.replace('tuition.html');
+        } else {
+            window.location.replace('login.html');
+        }
+    </script>
+</head>
+<body>
+    <p>Đang chuyển hướng đến <a href="login.html">trang đăng nhập TDTU iBanking</a>...</p>
+</body>
+</html>
+

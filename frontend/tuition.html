@@ -2,125 +2,327 @@
 <html lang="vi">
 <head>
     <meta charset="UTF-8">
-    <title>Tra cứu học phí</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tra cứu & Thanh toán học phí - TDTU iBanking</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
     <nav class="navbar">
         <div class="brand">TDTU iBanking</div>
         <div class="user-info">
-            Xin chào, <span id="nav-user-name">Khách</span> 
-            | <a href="history.html">Lịch sử</a>
+            Xin chào, <strong id="nav-user-name">Khách</strong>
+            | Số dư: <span id="nav-user-balance">0</span> VNĐ
+            | <a href="history.html">Lịch sử GD</a>
             | <a href="login.html" onclick="sessionStorage.clear()">Đăng xuất</a>
         </div>
     </nav>
 
     <div class="page-container">
-        <div class="banking-card">
-            <h2>Tra Cứu Học Phí</h2>
-            
-            <div class="form-group">
-                <input type="text" id="mssvSearch" class="form-control" placeholder="Nhập MSSV cần nộp...">
+        <div class="banking-card" style="max-width: 640px;">
+            <h2>Tra Cứu & Thanh Toán Học Phí</h2>
+
+            <!-- NHÓM A: THÔNG TIN NGƯỜI NỘP TIỀN -->
+            <div class="section-box">
+                <h3 class="section-title">a. Thông tin người nộp tiền</h3>
+                <div class="form-row-grid">
+                    <div class="form-group">
+                        <label>Họ và tên</label>
+                        <input type="text" id="payerName" class="form-control" disabled readonly>
+                    </div>
+                    <div class="form-group">
+                        <label>Số điện thoại</label>
+                        <input type="text" id="payerPhone" class="form-control" disabled readonly>
+                    </div>
+                </div>
+                <div class="form-group" style="margin-bottom: 0;">
+                    <label>Địa chỉ email</label>
+                    <input type="email" id="payerEmail" class="form-control" disabled readonly>
+                </div>
             </div>
-            <button onclick="lookupTuition()" class="btn-primary" style="margin-bottom: 20px;">Tìm kiếm</button>
 
-            <!-- 1. Thêm display: none để ẩn ô thông báo lỗi mặc định ban đầu -->
-            <div id="not-found-msg" class="alert alert-error" style="display: none;"></div>
-
-            <div id="tuition-info" style="display: none;">
-                <h3 style="margin-bottom: 15px; font-size: 18px; border-bottom: 2px solid var(--primary-blue); padding-bottom: 5px;">Thông tin khoản nộp</h3>
-                
+            <!-- NHÓM B: THÔNG TIN HỌC PHÍ -->
+            <div class="section-box">
+                <h3 class="section-title">b. Thông tin học phí</h3>
                 <div class="form-group">
-                    <label>Người nộp tiền (Lấy từ session)</label>
-                    <input type="text" id="payerName" class="form-control" disabled> 
+                    <label>Mã số sinh viên</label>
+                    <div class="search-row">
+                        <input type="text" id="mssvSearch" class="form-control" placeholder="Nhập mã số sinh viên cần tra cứu">
+                        <button type="button" onclick="lookupTuition()" class="btn-search">Tra cứu</button>
+                    </div>
                 </div>
 
+                <div id="not-found-msg" class="alert alert-error" style="display: none;"></div>
+
+                <div id="tuition-info" style="display: none;">
+                    <div class="detail-row">
+                        <span class="label">Mã số sinh viên:</span>
+                        <span class="value" id="res-mssv"></span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="label">Họ và tên sinh viên:</span>
+                        <span class="value" id="studentName"></span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="label">Học kỳ:</span>
+                        <span class="value" id="hocKy"></span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="label">Số tiền học phí cần thanh toán:</span>
+                        <span class="value" style="color: var(--error-red); font-size: 17px;"><span id="amount"></span> VNĐ</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="label">Trạng thái khoản thu:</span>
+                        <span class="value" id="tuitionStatusBadge"></span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- NHÓM C: THÔNG TIN THANH TOÁN & ĐIỀU KHOẢN -->
+            <div class="section-box" id="payment-summary-section">
+                <h3 class="section-title">c. Thông tin thanh toán</h3>
                 <div class="detail-row">
-                    <span class="label">Mã số sinh viên:</span>
-                    <span class="value" id="res-mssv"></span>
+                    <span class="label">Số dư khả dụng của người nộp tiền:</span>
+                    <span class="value" style="color: var(--success-green); font-size: 17px;"><span id="availableBalanceDisplay">0</span> VNĐ</span>
                 </div>
                 <div class="detail-row">
-                    <span class="label">Tên sinh viên:</span>
-                    <span class="value" id="studentName"></span>
+                    <span class="label">Số tiền cần thanh toán:</span>
+                    <span class="value" style="color: var(--primary-blue); font-size: 17px;"><span id="paymentAmountDisplay">0</span> VNĐ</span>
                 </div>
-                <div class="detail-row">
-                    <span class="label">Học kỳ:</span>
-                    <span class="value" id="hocKy"></span>
+
+                <div class="form-group" style="margin-top: 14px; margin-bottom: 10px;">
+                    <label for="otpRecipientEmail">Địa chỉ Gmail nhận mã OTP</label>
+                    <input
+                        type="email"
+                        id="otpRecipientEmail"
+                        class="form-control"
+                        placeholder="Nhập địa chỉ Gmail nhận mã OTP"
+                        oninput="validatePaymentForm()"
+                        required
+                    >
                 </div>
-                <div class="detail-row">
-                    <span class="label">Số tiền phải nộp:</span>
-                    <span class="value" style="color: var(--error-red); font-size: 18px;"><span id="amount"></span> VNĐ</span>
+
+                <div id="validation-warning" class="alert alert-error" style="display: none; margin-top: 12px; margin-bottom: 12px;"></div>
+
+                <div class="terms-box">
+                    <div class="terms-content">
+                        <strong>Thỏa thuận và Điều khoản sử dụng dịch vụ TDTU iBanking:</strong>
+                        <ul>
+                            <li>Hệ thống chỉ thực hiện thanh toán toàn bộ khoản học phí của sinh viên, không hỗ trợ thanh toán một phần.</li>
+                            <li>Người nộp tiền chịu trách nhiệm kiểm tra chính xác Mã số sinh viên và Họ tên sinh viên trước khi xác nhận.</li>
+                            <li>Giao dịch được xác thực bằng mã OTP gửi qua địa chỉ email đã nhập với thời hạn tối đa 05 phút và chỉ sử dụng một lần.</li>
+                        </ul>
+                    </div>
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="agreeTerms" onchange="validatePaymentForm()">
+                        <span>Tôi đã đọc và đồng ý với các thỏa thuận và điều khoản của hệ thống</span>
+                    </label>
                 </div>
-                
-                <button onclick="goToPayment()" class="btn-primary" style="margin-top: 20px;">Xác nhận nộp học phí</button>
+
+                <button id="btnConfirmTransaction" onclick="goToPayment()" class="btn-primary" disabled>
+                    Xác nhận giao dịch
+                </button>
             </div>
         </div>
     </div>
 
     <script>
         const token = sessionStorage.getItem('token');
-        if (!token) {
+        const maNguoiDung = sessionStorage.getItem('MaNguoiDung');
+        if (!token || !maNguoiDung) {
             window.location.href = 'login.html';
         }
 
-        const hoTenNguoiNop = sessionStorage.getItem('HoTenNguoiNop');
-        document.getElementById('nav-user-name').innerText = hoTenNguoiNop || 'Khách';
+        let currentUserBalance = 0;
+        let currentTuition = null;
+        let debounceTimer = null;
 
-        document.getElementById('mssvSearch').addEventListener('keydown', function(e) {
-            if (e.key === 'Enter') lookupTuition();
+        async function loadCurrentUserProfile() {
+            try {
+                const res = await fetch(`http://localhost:8001/api/v1/users/me`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                let userData = null;
+                if (res.ok) {
+                    userData = await res.json();
+                } else {
+                    const fallbackRes = await fetch(`http://localhost:8001/api/v1/users/${maNguoiDung}`);
+                    if (fallbackRes.ok) {
+                        userData = await fallbackRes.json();
+                    }
+                }
+
+                if (userData) {
+                    currentUserBalance = Number(userData.available_balance ?? userData.SoDuKhaDung ?? 0);
+                    const fullName = userData.full_name || userData.HoTen || '';
+                    const phone = userData.phone || userData.SoDienThoai || '';
+                    const email = userData.email || userData.Email || '';
+
+                    sessionStorage.setItem('HoTenNguoiNop', fullName);
+                    sessionStorage.setItem('SoDienThoaiNguoiNop', phone);
+                    sessionStorage.setItem('EmailNguoiNop', email);
+                    sessionStorage.setItem('SoDuKhaDung', currentUserBalance);
+
+                    document.getElementById('nav-user-name').innerText = fullName;
+                    document.getElementById('nav-user-balance').innerText = currentUserBalance.toLocaleString('vi-VN');
+                    document.getElementById('payerName').value = fullName;
+                    document.getElementById('payerPhone').value = phone;
+                    document.getElementById('payerEmail').value = email;
+                    document.getElementById('availableBalanceDisplay').innerText = currentUserBalance.toLocaleString('vi-VN');
+                }
+            } catch (err) {
+                console.error("Không thể tải thông tin người dùng:", err);
+                const cachedName = sessionStorage.getItem('HoTenNguoiNop') || '';
+                const cachedPhone = sessionStorage.getItem('SoDienThoaiNguoiNop') || '';
+                const cachedEmail = sessionStorage.getItem('EmailNguoiNop') || '';
+                currentUserBalance = Number(sessionStorage.getItem('SoDuKhaDung') || 0);
+
+                document.getElementById('nav-user-name').innerText = cachedName;
+                document.getElementById('nav-user-balance').innerText = currentUserBalance.toLocaleString('vi-VN');
+                document.getElementById('payerName').value = cachedName;
+                document.getElementById('payerPhone').value = cachedPhone;
+                document.getElementById('payerEmail').value = cachedEmail;
+                document.getElementById('availableBalanceDisplay').innerText = currentUserBalance.toLocaleString('vi-VN');
+            }
+        }
+
+        const mssvInput = document.getElementById('mssvSearch');
+        mssvInput.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                lookupTuition();
+            }
+        });
+        mssvInput.addEventListener('input', function() {
+            clearTimeout(debounceTimer);
+            const val = mssvInput.value.trim();
+            if (val.length >= 8) {
+                debounceTimer = setTimeout(() => lookupTuition(), 400);
+            } else {
+                currentTuition = null;
+                document.getElementById('tuition-info').style.display = 'none';
+                document.getElementById('paymentAmountDisplay').innerText = '0';
+                validatePaymentForm();
+            }
         });
 
         async function lookupTuition() {
             const mssv = document.getElementById('mssvSearch').value.trim().toUpperCase();
             const notFoundMsg = document.getElementById('not-found-msg');
             const tuitionInfo = document.getElementById('tuition-info');
+            const warningDiv = document.getElementById('validation-warning');
 
-            // Reset trạng thái các thẻ
             tuitionInfo.style.display = 'none';
             notFoundMsg.style.display = 'none';
+            warningDiv.style.display = 'none';
+            currentTuition = null;
+            document.getElementById('paymentAmountDisplay').innerText = '0';
 
-            // Chặn khi chưa nhập MSSV
             if (!mssv) {
-                notFoundMsg.innerText = "Vui lòng nhập Mã số sinh viên!";
+                notFoundMsg.innerText = "Vui lòng nhập mã số sinh viên!";
                 notFoundMsg.style.display = 'block';
+                validatePaymentForm();
                 return;
             }
 
             try {
+                await loadCurrentUserProfile();
+
                 const res = await fetch(`http://localhost:8002/api/v1/tuitions/${mssv}`);
-                
-                if (res.status === 404 || !res.ok) {
-                    const errorData = await res.json().catch(() => ({}));
-                    notFoundMsg.innerText = errorData.detail || "Không tìm thấy sinh viên hoặc học phí đã được thanh toán!";
+                const data = await res.json().catch(() => ({}));
+
+                if (!res.ok) {
+                    notFoundMsg.innerText = data.detail || "Không tìm thấy thông tin sinh viên với mã số này!";
                     notFoundMsg.style.display = 'block';
+                    validatePaymentForm();
                     return;
                 }
 
-                const data = await res.json();
-                
-                // Hiển thị thông tin khoản nộp học phí
+                currentTuition = data;
+                const tuitionAmount = Number(data.SoTienPhaiNop || 0);
+
                 tuitionInfo.style.display = 'block';
-                document.getElementById('payerName').value = hoTenNguoiNop || '';
                 document.getElementById('res-mssv').innerText = data.MSSV;
                 document.getElementById('studentName').innerText = data.HoTen;
                 document.getElementById('hocKy').innerText = data.HocKy;
-                document.getElementById('amount').innerText = Number(data.SoTienPhaiNop).toLocaleString('vi-VN');
+                document.getElementById('amount').innerText = tuitionAmount.toLocaleString('vi-VN');
+                document.getElementById('paymentAmountDisplay').innerText = tuitionAmount.toLocaleString('vi-VN');
 
-                // Lưu session chuyển tiếp sang trang payment.html
-                sessionStorage.setItem('pay_MaHocPhi', data.MaHocPhi);
-                sessionStorage.setItem('pay_MSSV', data.MSSV);
-                sessionStorage.setItem('pay_Amount', data.SoTienPhaiNop);
+                const statusBadge = document.getElementById('tuitionStatusBadge');
+                if (data.TrangThai === 'CHUA_DONG') {
+                    statusBadge.innerText = 'CHƯA THANH TOÁN';
+                    statusBadge.style.color = 'var(--error-red)';
+                } else {
+                    statusBadge.innerText = 'ĐÃ THANH TOÁN';
+                    statusBadge.style.color = 'var(--success-green)';
+                }
+
+                validatePaymentForm();
 
             } catch (err) {
                 console.error(err);
-                notFoundMsg.innerText = "Lỗi kết nối tới Tuition Service (Port 8002)!";
+                notFoundMsg.innerText = "Không thể kết nối tới dịch vụ tra cứu học phí!";
                 notFoundMsg.style.display = 'block';
+                validatePaymentForm();
             }
         }
 
+        function validatePaymentForm() {
+            const btn = document.getElementById('btnConfirmTransaction');
+            const agreeTerms = document.getElementById('agreeTerms').checked;
+            const recipientEmail = document.getElementById('otpRecipientEmail').value.trim();
+            const warningDiv = document.getElementById('validation-warning');
+
+            warningDiv.style.display = 'none';
+
+            if (!currentTuition) {
+                btn.disabled = true;
+                return;
+            }
+
+            const amount = Number(currentTuition.SoTienPhaiNop || 0);
+
+            if (currentTuition.TrangThai !== 'CHUA_DONG') {
+                warningDiv.innerText = "Khoản học phí của sinh viên này đã được thanh toán. Không thể thực hiện giao dịch!";
+                warningDiv.style.display = 'block';
+                btn.disabled = true;
+                return;
+            }
+
+            if (currentUserBalance < amount) {
+                warningDiv.innerText = "Số dư khả dụng của tài khoản không đủ để thanh toán khoản học phí này!";
+                warningDiv.style.display = 'block';
+                btn.disabled = true;
+                return;
+            }
+
+            const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipientEmail);
+            if (!emailValid) {
+                if (recipientEmail.length > 0) {
+                    warningDiv.innerText = "Vui lòng nhập địa chỉ Gmail hợp lệ để nhận mã OTP!";
+                    warningDiv.style.display = 'block';
+                }
+                btn.disabled = true;
+                return;
+            }
+
+            btn.disabled = !agreeTerms;
+        }
+
         function goToPayment() {
+            if (!currentTuition || currentTuition.TrangThai !== 'CHUA_DONG') return;
+            const recipientEmail = document.getElementById('otpRecipientEmail').value.trim();
+
+            sessionStorage.setItem('pay_MaHocPhi', currentTuition.MaHocPhi);
+            sessionStorage.setItem('pay_MSSV', currentTuition.MSSV);
+            sessionStorage.setItem('pay_StudentName', currentTuition.HoTen);
+            sessionStorage.setItem('pay_HocKy', currentTuition.HocKy);
+            sessionStorage.setItem('pay_Amount', currentTuition.SoTienPhaiNop);
+            sessionStorage.setItem('pay_RecipientEmail', recipientEmail);
+
             window.location.href = 'payment.html';
         }
+
+        loadCurrentUserProfile();
     </script>
 </body>
 </html>
