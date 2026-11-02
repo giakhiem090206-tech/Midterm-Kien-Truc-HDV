@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Kiểm tra giao dịch · TDTU iBanking</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body data-app-page="review">
+    <div class="page-container">
+        <section class="banking-card review-card">
+            <div class="review-step">BƯỚC 2 / 3 · XÁC NHẬN</div>
+            <h2>Xác nhận thông tin thanh toán</h2>
+            <p class="panel-description">Hệ thống chỉ ghi nhận giao dịch sau khi bạn xác thực mã OTP.</p>
+            <div id="review-error" class="alert"></div>
+            <div class="receipt-box">
+                <div class="detail-row"><span class="label">Người nộp tiền</span><span class="value" id="review-payer">Đang tải...</span></div>
+                <div class="detail-row"><span class="label">Email nhận OTP</span><span class="value" id="review-email">—</span></div>
+                <div class="detail-row"><span class="label">MSSV / Sinh viên</span><span class="value" id="review-student">—</span></div>
+                <div class="detail-row"><span class="label">Học kỳ</span><span class="value" id="review-term">—</span></div>
+                <div class="detail-row"><span class="label">Số tiền thanh toán</span><span class="value" id="review-amount">—</span></div>
+                <div class="detail-row"><span class="label">Số dư khả dụng</span><span class="value" id="review-balance">—</span></div>
+            </div>
+            <label class="checkbox-row review-agreement">
+                <input type="checkbox" id="review-agree">
+                <span>Tôi đồng ý điều khoản và xác nhận số tiền thanh toán.</span>
+            </label>
+            <div class="review-actions">
+                <a class="btn-secondary" href="tuition.html">Quay lại</a>
+                <button class="btn-primary" id="send-otp" disabled>Gửi mã OTP</button>
+            </div>
+        </section>
+    </div>
+    <script src="common.js"></script>
+    <script>
+        const agree = document.getElementById('review-agree');
+        const sendButton = document.getElementById('send-otp');
+        let tuition = null;
+        let profile = null;
+
+        if (requireLogin()) initReview();
+        agree.addEventListener('change', updateReviewButton);
+        sendButton.addEventListener('click', createTransaction);
+
+        async function initReview() {
+            try {
+                profile = await apiFetch(`${API_BASE}/users/me`);
+                if (!profile.student_id) {
+                    throw new Error('Email tài khoản chưa được liên kết với mã sinh viên TDTU.');
+                }
+                tuition = await apiFetch(`${API_BASE}/tuitions/${encodeURIComponent(profile.student_id)}`);
+                if (sessionStorage.getItem('paymentIdempotencyMssv') !== profile.student_id) {
+                    sessionStorage.removeItem('paymentIdempotencyKey');
+                    sessionStorage.setItem('paymentIdempotencyMssv', profile.student_id);
+                }
+                if (tuition.MSSV.toUpperCase() !== profile.student_id.toUpperCase()) {
+                    throw new Error('Bạn chỉ có thể thanh toán học phí của chính mình.');
+                }
+                document.getElementById('review-payer').innerText = profile.full_name;
+                document.getElementById('review-email').innerText = profile.email;
+                document.getElementById('review-student').innerText = `${tuition.MSSV} · ${tuition.HoTen}`;
+                document.getElementById('review-term').innerText = tuition.HocKy;
+                document.getElementById('review-amount').innerText = formatVND(tuition.SoTienPhaiNop);
+                document.getElementById('review-balance').innerText = formatVND(profile.available_balance);
+                if (profile.available_balance < tuition.SoTienPhaiNop) {
+                    showAlert(document.getElementById('review-error'), 'Số dư khả dụng không đủ để thanh toán khoản học phí này.');
+                    return;
+                }
+            } catch (err) {
+                showAlert(document.getElementById('review-error'), err.message);
+            }
+            updateReviewButton();
+        }
+
+        function updateReviewButton() {
+            sendButton.disabled = !(tuition && profile && profile.available_balance >= tuition.SoTienPhaiNop && agree.checked);
+        }
+
+        async function createTransaction() {
+            hideAlert(document.getElementById('review-error'));
+            sendButton.disabled = true;
+            sendButton.innerText = 'Đang gửi mã OTP...';
+            const key = sessionStorage.getItem('paymentIdempotencyKey') || newIdempotencyKey();
+            sessionStorage.setItem('paymentIdempotencyKey', key);
+            try {
+                const data = await apiFetch(`${API_BASE}/payments`, {
+                    method: 'POST',
+                    headers: { 'Idempotency-Key': key },
+                    body: { MaHocPhi: tuition.MaHocPhi }
+                });
+                sessionStorage.removeItem('paymentIdempotencyKey');
+                sessionStorage.removeItem('paymentIdempotencyMssv');
+                window.location.href = `payment.html?txn=${encodeURIComponent(data.transaction_id)}`;
+            } catch (err) {
+                if ([400, 401, 403, 404, 409, 422, 502].includes(err.status)) {
+                    sessionStorage.removeItem('paymentIdempotencyKey');
+                    sessionStorage.removeItem('paymentIdempotencyMssv');
+                }
+                showAlert(document.getElementById('review-error'), err.message);
+                sendButton.disabled = false;
+                sendButton.innerText = 'Gửi mã OTP';
+            }
+        }
+    </script>
+</body>
+</html>

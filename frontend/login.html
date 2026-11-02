@@ -2,82 +2,74 @@
 <html lang="vi">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>TDTU iBanking - Đăng nhập</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>iBanking - Đăng nhập</title>
     <link rel="stylesheet" href="style.css">
-    <script src="config.js"></script>
 </head>
 <body>
-    <div class="page-container">
-        <div class="banking-card">
-            <h2>TDTU iBanking</h2>
-            <p class="subtitle">Phân hệ Thanh toán Học phí Sinh viên</p>
-            <div id="login-error" class="alert alert-error" style="display: none;"></div>
-            
-            <form onsubmit="handleLogin(event)">
+    <main class="login-screen">
+        <section class="login-card">
+            <div class="login-art">
+                <div class="login-art-label">TDTU · DIGITAL CAMPUS</div>
+                <h1>Your campus,<span>your peace of mind.</span></h1>
+            </div>
+            <div class="login-form-wrap">
+                <div class="login-form-inner">
+                    <div class="login-brand"><span class="brand-mark" aria-hidden="true">◈</span><span>TDTU</span></div>
+                    <h2>Chào mừng trở lại 👋</h2>
+                    <p class="login-subtitle">Đăng nhập để tiếp tục thanh toán học phí.</p>
+                    <div id="login-error" class="alert alert-error"></div>
+                    <form id="login-form">
                 <div class="form-group">
-                    <label>Tên đăng nhập</label>
-                    <input type="text" id="username" class="form-control" placeholder="Nhập tên đăng nhập hoặc MSSV" required>
+                    <label for="username">Tên đăng nhập</label>
+                    <input type="text" id="username" class="form-control" placeholder="Nhập tài khoản" autocomplete="username" required>
                 </div>
                 <div class="form-group">
-                    <label>Mật khẩu</label>
-                    <input type="password" id="password" class="form-control" placeholder="••••••••" required>
+                    <label for="password">Mật khẩu</label>
+                    <input type="password" id="password" class="form-control" placeholder="••••••••" autocomplete="current-password" required>
                 </div>
-                <button type="submit" class="btn-primary">Đăng nhập</button>
+                <button type="submit" id="login-btn" class="btn-primary">Đăng nhập</button>
             </form>
-        </div>
-    </div>
+                    <p class="login-footnote">Chưa có đăng ký tài khoản mới.</p>
+                </div>
+            </div>
+        </section>
+    </main>
 
+    <script src="common.js"></script>
     <script>
-        async function handleLogin(event) {
-            event.preventDefault();
-            const username = document.getElementById('username').value.trim();
-            const password = document.getElementById('password').value.trim();
-            const errorDiv = document.getElementById('login-error');
+        // Đã đăng nhập thì vào thẳng trang thanh toán
+        if (getToken()) window.location.href = 'dashboard.html';
 
-            errorDiv.style.display = "none";
+        const errorDiv = document.getElementById('login-error');
+        const loginBtn = document.getElementById('login-btn');
+
+        document.getElementById('login-form').addEventListener('submit', async (event) => {
+            event.preventDefault();
+            hideAlert(errorDiv);
+            loginBtn.disabled = true;
+            loginBtn.innerText = 'Đang đăng nhập...';
 
             try {
-                const res = await fetch('http://localhost:8001/api/v1/auth/login', {
+                const data = await apiFetch(`${API_BASE}/auth/login`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        username: username,
-                        password: password
-                    })
+                    auth: false,
+                    body: {
+                        username: document.getElementById('username').value.trim(),
+                        password: document.getElementById('password').value
+                    }
                 });
 
-                const data = await res.json().catch(() => ({}));
-
-                if (!res.ok) {
-                    let message = "Sai tên đăng nhập hoặc mật khẩu!";
-                    if (typeof data.detail === 'string') {
-                        message = data.detail;
-                    }
-                    errorDiv.innerText = message;
-                    errorDiv.style.display = "block";
-                    return;
-                }
-
-                // Email tài khoản lấy theo <MSSV>@student.tdtu.edu.vn
-                const mssv = data.MSSV || '';
-                const studentEmail = mssv ? `${mssv.toUpperCase()}@student.tdtu.edu.vn` : (data.Email || '');
-
-                sessionStorage.setItem('token', data.access_token || '');
-                sessionStorage.setItem('MaNguoiDung', data.MaNguoiDung);
-                sessionStorage.setItem('MSSVNguoiNop', mssv);
-                sessionStorage.setItem('HoTenNguoiNop', data.HoTen || username);
-                sessionStorage.setItem('SoDienThoaiNguoiNop', data.SoDienThoai || '');
-                sessionStorage.setItem('EmailNguoiNop', studentEmail);
-                sessionStorage.setItem('SoDuKhaDung', data.SoDuKhaDung ?? 0);
-
-                window.location.href = 'tuition.html';
+                // Lưu JWT, các trang sau gửi kèm token trong header Authorization
+                sessionStorage.setItem('token', data.access_token);
+                sessionStorage.setItem('HoTen', data.HoTen);
+                window.location.href = 'dashboard.html';
             } catch (err) {
-                console.error(err);
-                errorDiv.innerText = "Lỗi kết nối tới Auth Service (Port 8001)!";
-                errorDiv.style.display = "block";
+                showAlert(errorDiv, err.message);
+                loginBtn.disabled = false;
+                loginBtn.innerText = 'Đăng nhập';
             }
-        }
+        });
     </script>
 </body>
 </html>

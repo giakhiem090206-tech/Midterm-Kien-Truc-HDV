@@ -1,71 +1,59 @@
 import os
-import random
-import smtplib
-from email.message import EmailMessage
+import uuid
+import secrets
+import threading
+import contextvars
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
-from typing import Optional, Dict, Any
+from typing import List, Optional
 import httpx
-from fastapi import FastAPI, Depends, HTTPException, status, Header
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import Depends, HTTPException, Header, Response, status
 from pydantic import BaseModel, Field
-from sqlalchemy import Column, Integer, String, Numeric, DateTime, create_engine
-from sqlalchemy.orm import declarative_base, Session, sessionmaker
-from adapters import get_notification_adapter
+from sqlalchemy import Column, Integer, String, Numeric, DateTime, create_engine, select, text
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session, declarative_base, sessionmaker
+from observability import set_request_id, tracing_headers
+from security import INTERNAL_API_KEY, get_current_user_id
+from service_app import create_app
 
-# 1. Cấu hình Database & Endpoint của các Microservices khác
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://root:rootpassword@db:5432/ibanking")
+# 1. Cấu hình Database & Endpoint của các Service khác
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://root:rootpassword@db:5432/payment_db")
 AUTH_SERVICE_URL = os.getenv("AUTH_SERVICE_URL", "http://auth-service:8001")
 TUITION_SERVICE_URL = os.getenv("TUITION_SERVICE_URL", "http://tuition-service:8002")
+# Gửi email (OTP, xác nhận) qua Notification Service, không gọi SMTP trực tiếp
+NOTIFICATION_SERVICE_URL = os.getenv("NOTIFICATION_SERVICE_URL", "http://notification-service:8004")
 
-# Cấu hình SMTP Email (mặc định smtp.gmail.com:587; sử dụng tài khoản Gmail & App Password đã cấu hình)
-SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
-SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
-SMTP_USER = os.getenv("SMTP_USER", "giaphucnguyen36573@gmail.com")
-SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "perm vvkd sjxv msqr")
+OTP_TTL_MINUTES = 5
+OTP_MAX_ATTEMPTS = 3
 
-engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-# 2. Database Models (đồng bộ 100% với init.sql)
+# 2. Database Models nội bộ của Payment Service
+# (Số dư thuộc Auth Service, học phí thuộc Tuition Service -> chỉ truy cập qua REST API)
 class GiaoDichModel(Base):
-    __tablename__ = "giao_dich"
-    ma_giao_dich = Column(String(50), primary_key=True)
-    ma_nguoi_dung = Column(Integer, nullable=False)
-    ma_hoc_phi = Column(Integer, nullable=False)
-    so_tien_giao_dich = Column(Numeric(15, 2), nullable=False)
-    thoi_gian_tao = Column(DateTime, nullable=False, default=datetime.utcnow)
-    trang_thai = Column(String(30), nullable=False)  # 'PENDING', 'SUCCESS', 'FAILED'
+    __tablename__ = "GiaoDich"
+    MaGiaoDich = Column(String(50), primary_key=True)
+    MaNguoiDung = Column(Integer, nullable=False)
+    MaHocPhi = Column(Integer, nullable=False)
+    MSSV = Column(String(20), nullable=False)
+    TenSinhVien = Column(String(100), nullable=False)
+    SoTienGiaoDich = Column(Numeric(15, 2), nullable=False)
+    NgayGiaoDich = Column(DateTime, nullable=False)
+    TrangThai = Column(String(30), nullable=False)  # 'PENDING', 'PROCESSING', 'SUCCESS', 'FAILED'
+    UpdatedAt = Column(DateTime, nullable=False, default=datetime.utcnow)
+    IdempotencyKey = Column(String(100), nullable=True)  # duy nhất theo (MaNguoiDung, IdempotencyKey)
 
 class XacThucOTPModel(Base):
-    __tablename__ = "xac_thuc_otp"
-    ma_otp = Column(Integer, primary_key=True, index=True)
-    ma_giao_dich = Column(String(50), nullable=False, index=True)
-    ma_code = Column(String(10), nullable=False)
-    thoi_gian_tao = Column(DateTime, nullable=False, default=datetime.utcnow)
-    thoi_gian_het_han = Column(DateTime, nullable=False)
-    trang_thai = Column(String(30), nullable=False)  # 'CHUA_SU_DUNG', 'DA_SU_DUNG', 'HET_HAN'
-
-class UserModel(Base):
-    __tablename__ = "nguoi_dung"
-    ma_nguoi_dung = Column(Integer, primary_key=True)
-    mssv = Column(String(20), nullable=False)
-    ten_dang_nhap = Column(String(50), nullable=False)
-    ho_ten = Column(String(100), nullable=False)
-    so_dien_thoai = Column(String(20), nullable=False)
-    email = Column(String(100), nullable=False)
-    so_du = Column(Numeric(15, 2), nullable=False)
-
-class HocPhiModel(Base):
-    __tablename__ = "hoc_phi"
-    ma_hoc_phi = Column(Integer, primary_key=True)
-    mssv = Column(String(20), nullable=False)
-    ho_ten_sinh_vien = Column(String(100), nullable=False)
-    hoc_ky = Column(String(50), nullable=False)
-    so_tien_phai_nop = Column(Numeric(15, 2), nullable=False)
-    trang_thai = Column(String(30), nullable=False)
-
-Base.metadata.create_all(bind=engine)
+    __tablename__ = "XacThucOTP"
+    MaOTP = Column(Integer, primary_key=True, index=True)
+    MaGiaoDich = Column(String(50), nullable=False)
+    MaCode = Column(String(10), nullable=False)
+    ThoiGianTao = Column(DateTime, nullable=False)
+    ThoiGianHetHan = Column(DateTime, nullable=False)
+    SoLanNhapSai = Column(Integer, nullable=False, default=0)
+    TrangThai = Column(String(30), nullable=False)  # 'CHUA_SU_DUNG', 'DA_SU_DUNG'
 
 def get_db():
     db = SessionLocal()
@@ -74,560 +62,493 @@ def get_db():
     finally:
         db.close()
 
-# Bộ nhớ lưu trữ Idempotency-Key (IK) chống xử lý trùng lặp khi mạng retry / người dùng bấm đúp
-IDEMPOTENCY_STORE: Dict[str, Dict[str, Any]] = {}
+# 3. Khởi tạo FastAPI
+_recovery_stop = threading.Event()
 
-def send_email_notification(to_email: str, subject: str, body_text: str, html_body: Optional[str] = None) -> bool:
-    """
-    Gửi thông báo qua tầng Adapter (NotificationAdapter -> GmailSMTPAdapter / ConsoleMailAdapter).
-    """
-    adapter = get_notification_adapter()
-    return adapter.send(recipient=to_email, subject=subject, text_body=body_text, html_body=html_body)
+@asynccontextmanager
+async def lifespan(app):
+    # Migration cộng thêm cho DB tạo trước khi có saga recovery / Idempotency-Key
+    with engine.begin() as connection:
+        connection.execute(text(
+            'ALTER TABLE "GiaoDich" ADD COLUMN IF NOT EXISTS "UpdatedAt" '
+            'TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP'
+        ))
+        connection.execute(text(
+            'ALTER TABLE "GiaoDich" ADD COLUMN IF NOT EXISTS "IdempotencyKey" VARCHAR(100)'
+        ))
+        connection.execute(text(
+            'CREATE UNIQUE INDEX IF NOT EXISTS "uq_giaodich_idempotency" '
+            'ON "GiaoDich" ("MaNguoiDung", "IdempotencyKey")'
+        ))
+    # Worker nền tự thử lại các giao dịch PROCESSING bị dở dang
+    _recovery_stop.clear()
+    recovery_worker = threading.Thread(
+        target=_recovery_loop,
+        name="payment-saga-recovery",
+        daemon=True,
+    )
+    recovery_worker.start()
+    try:
+        yield
+    finally:
+        _recovery_stop.set()
+        recovery_worker.join(timeout=10)
 
-# 3. Khởi tạo FastAPI & CORS
-app = FastAPI(
-    title="Payment Service - TDTU iBanking",
-    description="Microservice điều phối thanh toán học phí, sinh/xác thực OTP, xử lý Transaction & Concurrency",
-    version="1.0.0"
-)
+app, logger = create_app("Payment Service", "payment-service", docs_prefix="/api/v1/payments", lifespan=lifespan)
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+def internal_client() -> httpx.Client:
+    """HTTP client gọi API nội bộ của Auth/Tuition/Notification Service (kèm X-Request-ID để tracing)"""
+    return httpx.Client(timeout=10, headers={"X-Internal-Key": INTERNAL_API_KEY, **tracing_headers()})
 
 # 4. Pydantic Schemas
-class InitiatePaymentRequest(BaseModel):
-    MaNguoiDung: int = Field(..., gt=0, description="Mã người dùng nộp tiền")
-    MaHocPhi: int = Field(..., gt=0, description="Mã khoản học phí cần thanh toán")
-    email: Optional[str] = Field(default=None, description="Địa chỉ Gmail người dùng nhập để nhận OTP")
+class CreatePaymentRequest(BaseModel):
+    MaHocPhi: int = Field(gt=0)
 
-class InitiatePaymentResponse(BaseModel):
+class CreatePaymentResponse(BaseModel):
     transaction_id: str
-    MaGiaoDich: str
-    email: str
-    smtp_sent: bool = False
-    expires_in_seconds: int = 300
-    otp_demo: str
-    idempotency_key: Optional[str] = None
-    idempotent_replay: bool = False
     message: str
+    otp_expires_at: str
 
 class ConfirmPaymentRequest(BaseModel):
-    MaGiaoDich: str = Field(..., min_length=1, description="Mã giao dịch cần xác nhận")
-    otp: str = Field(..., min_length=1, description="Mã OTP 6 chữ số")
-    email: Optional[str] = Field(default=None, description="Địa chỉ Gmail nhận biên lai xác nhận")
+    otp: str = Field(pattern=r"^\d{6}$")
 
-class TransactionResponse(BaseModel):
+class ConfirmPaymentResponse(BaseModel):
     message: str
     transaction_id: str
-    MaGiaoDich: str
     status: str
-    amount: Optional[float] = None
-    new_balance: Optional[float] = None
-    mssv: Optional[str] = None
-    student_name: Optional[str] = None
-    semester: Optional[str] = None
-    email_sent_to: Optional[str] = None
-    idempotency_key: Optional[str] = None
-    idempotent_replay: bool = False
+    new_balance: float
 
-class WebhookCallbackRequest(BaseModel):
+class TransactionDetail(BaseModel):
     MaGiaoDich: str
-    event_type: str = "PAYMENT_CONFIRMED"
-    status: str = "SUCCESS"
+    MaHocPhi: int
+    MSSV: str
+    TenSinhVien: str
+    SoTienGiaoDich: float
+    NgayGiaoDich: str
+    TrangThai: str
+    otp_expires_at: Optional[str] = None
 
-# 5. API Endpoints
+def _iso_utc(dt: datetime) -> str:
+    return dt.isoformat() + "Z"
 
-@app.post(
-    "/api/v1/payments/initiate",
-    response_model=InitiatePaymentResponse,
-    status_code=status.HTTP_201_CREATED,
-    tags=["Payment"]
-)
-async def initiate_payment(
-    request: InitiatePaymentRequest,
-    idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
-    db: Session = Depends(get_db)
+def _error_detail(res: httpx.Response, default: str) -> str:
+    try:
+        return res.json().get("detail", default)
+    except ValueError:
+        return default
+
+def _fail_transaction(db: Session, gd: GiaoDichModel, status_code: int, detail: str):
+    gd.TrangThai = "FAILED"
+    gd.UpdatedAt = datetime.utcnow()
+    db.commit()
+    logger.warning("Giao dịch %s -> FAILED: %s", gd.MaGiaoDich, detail)
+    raise HTTPException(status_code=status_code, detail=detail)
+
+def _retry_transaction(db: Session, gd: GiaoDichModel, detail: str, cause: Optional[Exception] = None):
+    """Keep transient failures retryable without polling the same row every loop."""
+    gd.UpdatedAt = datetime.utcnow()
+    db.commit()
+    logger.warning("Giao dịch %s vẫn PROCESSING, sẽ thử lại: %s", gd.MaGiaoDich, detail)
+    error = HTTPException(status_code=503, detail=detail)
+    if cause:
+        raise error from cause
+    raise error
+
+def _expire_stale_transactions(db: Session, user_id: int):
+    """Giao dịch PENDING có OTP đã hết hạn mà chưa xác nhận -> FAILED"""
+    expired_txn_ids = select(XacThucOTPModel.MaGiaoDich).where(
+        XacThucOTPModel.TrangThai == "CHUA_SU_DUNG",
+        XacThucOTPModel.ThoiGianHetHan < datetime.utcnow()
+    )
+    db.query(GiaoDichModel).filter(
+        GiaoDichModel.MaNguoiDung == user_id,
+        GiaoDichModel.TrangThai == "PENDING",
+        GiaoDichModel.MaGiaoDich.in_(expired_txn_ids)
+    ).update({GiaoDichModel.TrangThai: "FAILED"}, synchronize_session=False)
+    db.commit()
+
+def _get_own_transaction(db: Session, transaction_id: str, user_id: int, lock: bool = False) -> GiaoDichModel:
+    query = db.query(GiaoDichModel).filter(GiaoDichModel.MaGiaoDich == transaction_id)
+    if lock:
+        query = query.with_for_update()
+    gd = query.first()
+    if not gd:
+        db.rollback()
+        raise HTTPException(status_code=404, detail="Không tìm thấy giao dịch")
+    if gd.MaNguoiDung != user_id:
+        db.rollback()
+        raise HTTPException(status_code=403, detail="Bạn không có quyền truy cập giao dịch này")
+    return gd
+
+def _to_detail(gd: GiaoDichModel, otp: Optional[XacThucOTPModel] = None) -> dict:
+    return {
+        "MaGiaoDich": gd.MaGiaoDich,
+        "MaHocPhi": gd.MaHocPhi,
+        "MSSV": gd.MSSV,
+        "TenSinhVien": gd.TenSinhVien,
+        "SoTienGiaoDich": float(gd.SoTienGiaoDich),
+        "NgayGiaoDich": _iso_utc(gd.NgayGiaoDich),
+        "TrangThai": gd.TrangThai,
+        "otp_expires_at": _iso_utc(otp.ThoiGianHetHan) if otp else None
+    }
+
+# 5. Gửi thông báo qua Notification Service
+def _notify(to: str, template: str, data: dict):
+    """Gọi Notification Service gửi email theo mẫu, ném exception nếu gửi thất bại"""
+    with internal_client() as client:
+        res = client.post(f"{NOTIFICATION_SERVICE_URL}/api/v1/notifications", json={
+            "channel": "email", "to": to, "template": template, "data": data
+        })
+    if not res.is_success:
+        raise RuntimeError(f"Notification Service trả {res.status_code}: {_error_detail(res, res.text)}")
+
+def _replay_idempotent_request(db: Session, gd: GiaoDichModel, request: CreatePaymentRequest, response: Response) -> dict:
+    """Request lặp lại cùng Idempotency-Key: trả lại giao dịch đã tạo, không tạo mới và không gửi OTP lần hai"""
+    if gd.MaHocPhi != request.MaHocPhi:
+        raise HTTPException(status_code=409, detail="Idempotency-Key đã được dùng cho một yêu cầu khác")
+    otp = db.query(XacThucOTPModel).filter(
+        XacThucOTPModel.MaGiaoDich == gd.MaGiaoDich
+    ).order_by(XacThucOTPModel.MaOTP.desc()).first()
+    response.headers["Idempotent-Replayed"] = "true"
+    return {
+        "transaction_id": gd.MaGiaoDich,
+        "message": "Giao dịch đã được tạo trước đó, mã OTP đã được gửi đến email của bạn.",
+        "otp_expires_at": _iso_utc(otp.ThoiGianHetHan)
+    }
+
+def _find_by_idempotency_key(db: Session, user_id: int, key: str) -> Optional[GiaoDichModel]:
+    return db.query(GiaoDichModel).filter(
+        GiaoDichModel.MaNguoiDung == user_id,
+        GiaoDichModel.IdempotencyKey == key
+    ).first()
+
+def _generate_unique_otp(db: Session) -> str:
+    """Sinh OTP 6 số ngẫu nhiên, không trùng với OTP đang còn hiệu lực của giao dịch khác"""
+    while True:
+        code = f"{secrets.randbelow(1_000_000):06d}"
+        in_use = db.query(XacThucOTPModel).filter(
+            XacThucOTPModel.MaCode == code,
+            XacThucOTPModel.TrangThai == "CHUA_SU_DUNG",
+            XacThucOTPModel.ThoiGianHetHan > datetime.utcnow()
+        ).first()
+        if not in_use:
+            return code
+
+def _send_success_email(ma_giao_dich: str, ma_nguoi_dung: int, mssv: str, ten_sv: str, amount: str, new_balance: float):
+    """Chạy nền sau khi giao dịch thành công: gửi email xác nhận cho người nộp tiền"""
+    try:
+        with internal_client() as client:
+            user = client.get(f"{AUTH_SERVICE_URL}/api/v1/users/{ma_nguoi_dung}").json()
+
+        _notify(user["email"], "PAYMENT_SUCCESS", {
+            "full_name": user["full_name"],
+            "transaction_id": ma_giao_dich,
+            "mssv": mssv,
+            "student_name": ten_sv,
+            "amount": amount,
+            "new_balance": new_balance
+        })
+    except Exception as e:
+        logger.error("Không gửi được email xác nhận cho giao dịch %s: %s", ma_giao_dich, e)
+
+def _continue_payment(transaction_id: str):
+    """Resume a PROCESSING saga safely; downstream operations are keyed by transaction_id."""
+    db = SessionLocal()
+    try:
+        gd = db.query(GiaoDichModel).filter(
+            GiaoDichModel.MaGiaoDich == transaction_id
+        ).with_for_update().first()
+        if not gd or gd.TrangThai != "PROCESSING":
+            db.rollback()
+            return None
+
+        amount_payload = {
+            "amount": str(gd.SoTienGiaoDich),
+            "transaction_id": gd.MaGiaoDich
+        }
+        with internal_client() as client:
+            try:
+                deduct_res = client.post(
+                    f"{AUTH_SERVICE_URL}/api/v1/users/{gd.MaNguoiDung}/deduct-balance",
+                    json=amount_payload
+                )
+            except httpx.HTTPError as exc:
+                _retry_transaction(db, gd, "Auth Service chưa phản hồi; giao dịch sẽ được thử lại", exc)
+
+            if deduct_res.status_code != 200:
+                detail = _error_detail(deduct_res, "Không thể trừ số dư tài khoản")
+                if deduct_res.status_code in (400, 404, 409):
+                    _fail_transaction(db, gd, deduct_res.status_code, detail)
+                _retry_transaction(db, gd, "Auth Service lỗi tạm thời; giao dịch sẽ được thử lại")
+
+            try:
+                tuition_res = client.post(
+                    f"{TUITION_SERVICE_URL}/api/v1/tuitions/{gd.MaHocPhi}/pay",
+                    json={"transaction_id": gd.MaGiaoDich}
+                )
+            except httpx.HTTPError as exc:
+                _retry_transaction(db, gd, "Tuition Service chưa phản hồi; giao dịch sẽ được thử lại", exc)
+
+            if tuition_res.status_code != 200:
+                detail = _error_detail(tuition_res, "Không thể gạch nợ học phí")
+                if tuition_res.status_code not in (400, 404, 409):
+                    _retry_transaction(db, gd, "Tuition Service lỗi tạm thời; giao dịch sẽ được thử lại")
+
+                # A definitive tuition rejection requires an idempotent compensation.
+                try:
+                    refund_res = client.post(
+                        f"{AUTH_SERVICE_URL}/api/v1/users/{gd.MaNguoiDung}/refund",
+                        json=amount_payload
+                    )
+                except httpx.HTTPError as exc:
+                    _retry_transaction(db, gd, "Hoàn tiền chưa xác nhận được; giao dịch sẽ được thử lại", exc)
+                if refund_res.status_code != 200:
+                    _retry_transaction(db, gd, "Hoàn tiền chưa hoàn tất; giao dịch sẽ được thử lại")
+                _fail_transaction(db, gd, tuition_res.status_code, detail)
+
+        gd.TrangThai = "SUCCESS"
+        gd.UpdatedAt = datetime.utcnow()
+        db.commit()
+        new_balance = deduct_res.json()["new_balance"]
+        logger.info("Giao dịch %s -> SUCCESS (MSSV %s, %s)", gd.MaGiaoDich, gd.MSSV, gd.SoTienGiaoDich)
+        # copy_context: thread gửi mail giữ nguyên request ID của request hiện tại
+        threading.Thread(
+            target=contextvars.copy_context().run,
+            args=(_send_success_email, gd.MaGiaoDich, gd.MaNguoiDung, gd.MSSV, gd.TenSinhVien,
+                  str(gd.SoTienGiaoDich), new_balance),
+            daemon=True
+        ).start()
+        return {
+            "message": "Thanh toán học phí thành công",
+            "transaction_id": transaction_id,
+            "status": "SUCCESS",
+            "new_balance": new_balance
+        }
+    finally:
+        db.close()
+
+def _recovery_loop():
+    """Retry old PROCESSING transactions after service restart or transient failures."""
+    while not _recovery_stop.wait(5):
+        db = SessionLocal()
+        try:
+            cutoff = datetime.utcnow() - timedelta(seconds=15)
+            transaction_ids = [row[0] for row in db.query(GiaoDichModel.MaGiaoDich).filter(
+                GiaoDichModel.TrangThai == "PROCESSING",
+                GiaoDichModel.UpdatedAt < cutoff
+            ).order_by(GiaoDichModel.UpdatedAt.asc()).limit(20).all()]
+        except Exception as exc:
+            logger.error("Không đọc được giao dịch cần phục hồi: %s", exc)
+            transaction_ids = []
+        finally:
+            db.close()
+        for transaction_id in transaction_ids:
+            # Mỗi lần phục hồi có request ID riêng để lần theo qua Auth/Tuition/Notification
+            set_request_id(f"recovery-{uuid.uuid4().hex[:12]}")
+            logger.info("Phục hồi giao dịch %s", transaction_id)
+            try:
+                _continue_payment(transaction_id)
+            except HTTPException as exc:
+                logger.info("Phục hồi giao dịch %s chưa xong: %s", transaction_id, exc.detail)
+            except Exception as exc:
+                logger.error("Không phục hồi được giao dịch %s: %s", transaction_id, exc)
+
+# 6. API Endpoints
+# Lưu ý: dùng `def` (không phải `async def`) để FastAPI chạy trong threadpool,
+# tránh việc truy vấn DB có khoá dòng chặn event loop khi nhiều request đồng thời.
+
+@app.post("/api/v1/payments", response_model=CreatePaymentResponse, status_code=status.HTTP_201_CREATED, tags=["Payment"])
+def create_payment(
+    request: CreatePaymentRequest,
+    response: Response,
+    user_id: int = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+    idempotency_key: Optional[str] = Header(None, min_length=1, max_length=100)
 ):
     """
-    Bước 1: Khởi tạo giao dịch thanh toán học phí (Hỗ trợ Idempotency-Key chống tạo giao dịch trùng).
-    - Giao tiếp với Auth Service kiểm tra thông tin người nộp & số dư khả dụng.
-    - Giao tiếp với Tuition Service kiểm tra khoản học phí tồn tại và chưa được thanh toán.
-    - Sinh mã OTP 6 chữ số (gắn với giao dịch, không trùng với OTP đang có hiệu lực, hạn 5 phút, dùng 1 lần).
-    - Gửi mã OTP qua Adapter tới địa chỉ email.
+    Khởi tạo giao dịch: kiểm tra số dư (Auth Service) và khoản học phí (Tuition Service),
+    tạo giao dịch PENDING và gửi OTP qua email người nộp tiền.
+
+    Header `Idempotency-Key` (tuỳ chọn): gửi lại cùng khoá (bấm nút 2 lần, mạng chập chờn
+    tự gửi lại) sẽ nhận về giao dịch đã tạo thay vì tạo giao dịch và OTP mới.
     """
-    if idempotency_key:
-        ik_cache_key = f"INITIATE:{idempotency_key.strip()}"
-        if ik_cache_key in IDEMPOTENCY_STORE:
-            cached_resp = dict(IDEMPOTENCY_STORE[ik_cache_key])
-            cached_resp["idempotent_replay"] = True
-            return cached_resp
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        # Gọi Auth Service lấy thông tin người dùng & số dư
-        user_res = await client.get(f"{AUTH_SERVICE_URL}/api/v1/users/{request.MaNguoiDung}")
-        if user_res.status_code == 404:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy người dùng nộp tiền")
-        if user_res.status_code != 200:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Người dùng không hợp lệ")
-        user_data = user_res.json()
+    try:
+        with internal_client() as client:
+            # Gọi Auth Service lấy thông tin người dùng & số dư
+            user_res = client.get(f"{AUTH_SERVICE_URL}/api/v1/users/{user_id}")
+            # Gọi Tuition Service lấy thông tin khoản học phí
+            tuition_res = client.get(f"{TUITION_SERVICE_URL}/api/v1/tuitions/detail/{request.MaHocPhi}")
+    except httpx.HTTPError:
+        raise HTTPException(status_code=503, detail="Không kết nối được tới Auth/Tuition Service")
 
-        # Gọi Tuition Service lấy thông tin khoản học phí
-        tuition_res = await client.get(f"{TUITION_SERVICE_URL}/api/v1/tuitions/detail/{request.MaHocPhi}")
-        if tuition_res.status_code == 404:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Khoản học phí không tồn tại")
-        if tuition_res.status_code != 200:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Khoản học phí không hợp lệ")
-        tuition_data = tuition_res.json()
+    if user_res.status_code != 200:
+        raise HTTPException(status_code=404, detail="Không tìm thấy người dùng")
+    if tuition_res.status_code == 404:
+        raise HTTPException(status_code=404, detail="Không tìm thấy khoản học phí")
+    if tuition_res.status_code != 200:
+        raise HTTPException(status_code=502, detail="Tuition Service phản hồi lỗi")
+    user_data = user_res.json()
+    tuition_data = tuition_res.json()
 
-    # Kiểm tra trạng thái học phí phải chưa được thanh toán
-    if tuition_data.get("TrangThai") == "DA_DONG":
+    if not user_data.get("student_id"):
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Khoản học phí này đã được thanh toán!"
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Tài khoản chưa được liên kết với mã sinh viên TDTU"
+        )
+    if tuition_data["MSSV"].strip().upper() != user_data["student_id"].strip().upper():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Bạn chỉ có thể thanh toán học phí của chính mình"
         )
 
-    # Kiểm tra số dư khả dụng >= số tiền cần thanh toán
-    available_balance = float(user_data.get("available_balance", 0))
-    tuition_amount = float(tuition_data.get("SoTienPhaiNop", 0))
-    if available_balance < tuition_amount:
+    if idempotency_key:
+        existing = _find_by_idempotency_key(db, user_id, idempotency_key)
+        if existing:
+            return _replay_idempotent_request(db, existing, request, response)
+
+    if tuition_data["TrangThai"] != "CHUA_DONG":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Khoản học phí này đã được thanh toán"
+        )
+
+    # Kiểm tra số dư khả dụng
+    if float(user_data["available_balance"]) < float(tuition_data["SoTienPhaiNop"]):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Số dư khả dụng không đủ để thực hiện giao dịch"
         )
 
+    # Tạo giao dịch PENDING (uuid để không trùng mã khi nhiều giao dịch tạo cùng lúc)
+    ma_giao_dich = f"TXN_{uuid.uuid4().hex}"
     now = datetime.utcnow()
-    # Sinh mã giao dịch duy nhất (kết hợp timestamp microsecond và số ngẫu nhiên để không trùng khi bắn Concurrency)
-    ma_giao_dich = f"TXN_{now.strftime('%Y%m%d%H%M%S%f')}_{random.randint(100, 999)}"
-
     gd = GiaoDichModel(
-        ma_giao_dich=ma_giao_dich,
-        ma_nguoi_dung=request.MaNguoiDung,
-        ma_hoc_phi=request.MaHocPhi,
-        so_tien_giao_dich=tuition_amount,
-        thoi_gian_tao=now,
-        trang_thai="PENDING"
+        MaGiaoDich=ma_giao_dich,
+        MaNguoiDung=user_id,
+        MaHocPhi=request.MaHocPhi,
+        MSSV=tuition_data["MSSV"],
+        TenSinhVien=tuition_data["HoTen"],
+        SoTienGiaoDich=tuition_data["SoTienPhaiNop"],
+        NgayGiaoDich=now,
+        TrangThai="PENDING",
+        IdempotencyKey=idempotency_key
     )
     db.add(gd)
 
-    # Sinh OTP 6 chữ số ngẫu nhiên, ĐẢM BẢO KHÔNG TRÙNG với bất kỳ OTP nào đang còn hiệu lực của giao dịch khác
-    while True:
-        ma_code = f"{random.randint(100000, 999999)}"
-        duplicate_active_otp = (
-            db.query(XacThucOTPModel)
-            .filter(
-                XacThucOTPModel.ma_code == ma_code,
-                XacThucOTPModel.trang_thai == "CHUA_SU_DUNG",
-                XacThucOTPModel.thoi_gian_het_han > now
-            )
-            .first()
-        )
-        if not duplicate_active_otp:
-            break
-
-    expires_at = now + timedelta(minutes=5)
+    # Sinh OTP 6 số ngẫu nhiên gắn với giao dịch, hết hạn sau 5 phút
+    ma_code = _generate_unique_otp(db)
     otp = XacThucOTPModel(
-        ma_giao_dich=ma_giao_dich,
-        ma_code=ma_code,
-        thoi_gian_tao=now,
-        thoi_gian_het_han=expires_at,
-        trang_thai="CHUA_SU_DUNG"
+        MaGiaoDich=ma_giao_dich,
+        MaCode=ma_code,
+        ThoiGianTao=now,
+        ThoiGianHetHan=now + timedelta(minutes=OTP_TTL_MINUTES),
+        SoLanNhapSai=0,
+        TrangThai="CHUA_SU_DUNG"
     )
     db.add(otp)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # 2 request cùng Idempotency-Key tới đồng thời: request sau vướng ràng buộc UNIQUE
+        # (MaNguoiDung, IdempotencyKey) -> trả lại giao dịch mà request trước đã tạo
+        db.rollback()
+        existing = _find_by_idempotency_key(db, user_id, idempotency_key) if idempotency_key else None
+        if not existing:
+            raise
+        return _replay_idempotent_request(db, existing, request, response)
 
-    # Email nhận OTP ưu tiên lấy từ địa chỉ Gmail người dùng tự nhập, nếu không có mới lấy email tài khoản
-    target_email = (
-        request.email.strip()
-        if request.email and request.email.strip()
-        else user_data.get("email", "unknown@student.tdtu.edu.vn")
-    )
-    if "@" not in target_email:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Địa chỉ Gmail nhận OTP không hợp lệ"
-        )
+    # Gửi OTP qua email của người nộp tiền (qua Notification Service)
+    try:
+        _notify(user_data["email"], "OTP", {
+            "full_name": user_data["full_name"],
+            "mssv": tuition_data["MSSV"],
+            "student_name": tuition_data["HoTen"],
+            "amount": tuition_data["SoTienPhaiNop"],
+            "otp": ma_code,
+            "ttl_minutes": OTP_TTL_MINUTES,
+            "transaction_id": ma_giao_dich
+        })
+    except Exception as e:
+        logger.error("Không gửi được email OTP cho giao dịch %s: %s", ma_giao_dich, e)
+        _fail_transaction(db, gd, status.HTTP_502_BAD_GATEWAY, "Không gửi được email OTP, vui lòng thử lại sau")
 
-    email_body = (
-        f"Xin chào {user_data.get('full_name')},\n\n"
-        f"Bạn vừa yêu cầu thanh toán học phí trên hệ thống TDTU iBanking:\n"
-        f"- Mã giao dịch: {ma_giao_dich}\n"
-        f"- Sinh viên thụ hưởng: {tuition_data.get('HoTen')} - MSSV: {tuition_data.get('MSSV')}\n"
-        f"- Học kỳ: {tuition_data.get('HocKy')}\n"
-        f"- Số tiền thanh toán: {tuition_amount:,.0f} VNĐ\n\n"
-        f"Mã xác thực OTP của bạn là: {ma_code}\n"
-        f"Mã OTP có hiệu lực trong vòng 05 phút và chỉ sử dụng 01 lần.\n\n"
-        f"Trân trọng,\nTDTU iBanking System"
-    )
-    email_html = f"""
-    <div style="font-family: Arial, sans-serif; max-width: 560px; margin: 0 auto; border: 1px solid #dce2ec; border-radius: 8px; overflow: hidden;">
-        <div style="background-color: #0A3D91; color: white; padding: 16px 24px; font-size: 18px; font-weight: bold;">
-            TDTU iBanking - Xác Thực Giao Dịch Đóng Học Phí
-        </div>
-        <div style="padding: 20px 24px; color: #333; line-height: 1.6;">
-            <p>Xin chào <strong>{user_data.get('full_name')}</strong>,</p>
-            <p>Hệ thống nhận được yêu cầu thanh toán học phí với thông tin chi tiết:</p>
-            <table style="width: 100%; border-collapse: collapse; margin: 12px 0;">
-                <tr><td style="padding: 6px 0; color: #555;">Mã giao dịch:</td><td style="padding: 6px 0; font-weight: bold;">{ma_giao_dich}</td></tr>
-                <tr><td style="padding: 6px 0; color: #555;">Mã số sinh viên:</td><td style="padding: 6px 0; font-weight: bold;">{tuition_data.get('MSSV')}</td></tr>
-                <tr><td style="padding: 6px 0; color: #555;">Họ và tên sinh viên:</td><td style="padding: 6px 0; font-weight: bold;">{tuition_data.get('HoTen')}</td></tr>
-                <tr><td style="padding: 6px 0; color: #555;">Học kỳ:</td><td style="padding: 6px 0; font-weight: bold;">{tuition_data.get('HocKy')}</td></tr>
-                <tr><td style="padding: 6px 0; color: #555;">Số tiền thanh toán:</td><td style="padding: 6px 0; font-weight: bold; color: #d9534f;">{tuition_amount:,.0f} VNĐ</td></tr>
-            </table>
-            <div style="text-align: center; margin: 20px 0; padding: 16px; background: #f4f7f9; border-radius: 8px;">
-                <div style="font-size: 14px; color: #555; margin-bottom: 6px;">Mã xác thực OTP của bạn</div>
-                <div style="font-size: 28px; font-weight: bold; letter-spacing: 6px; color: #0A3D91;">{ma_code}</div>
-                <div style="font-size: 12px; color: #777; margin-top: 6px;">Hiệu lực tối đa 05 phút và chỉ sử dụng 01 lần</div>
-            </div>
-            <p style="font-size: 13px; color: #666;">Nếu bạn không thực hiện giao dịch này, vui lòng bỏ qua email này.</p>
-        </div>
-    </div>
-    """
-    smtp_sent = send_email_notification(
-        to_email=target_email,
-        subject=f"[TDTU iBanking] Mã xác thực OTP giao dịch {ma_giao_dich}",
-        body_text=email_body,
-        html_body=email_html
-    )
+    logger.info("Tạo giao dịch %s: MaNguoiDung=%s trả MSSV %s (%s), đã gửi OTP",
+                ma_giao_dich, user_id, tuition_data["MSSV"], tuition_data["SoTienPhaiNop"])
 
-    result_payload = {
-        "transaction_id": ma_giao_dich,
-        "MaGiaoDich": ma_giao_dich,
-        "email": target_email,
-        "smtp_sent": smtp_sent,
-        "expires_in_seconds": 300,
-        "otp_demo": ma_code,
-        "idempotency_key": idempotency_key,
-        "idempotent_replay": False,
-        "message": f"Mã OTP đã được gửi đến địa chỉ {target_email}. Hiệu lực trong 5 phút."
-    }
-    if idempotency_key:
-        IDEMPOTENCY_STORE[f"INITIATE:{idempotency_key.strip()}"] = result_payload
-    return result_payload
-
-@app.get("/api/v1/payments/qr/{transaction_id}", tags=["Payment"])
-def get_payment_qr(transaction_id: str, db: Session = Depends(get_db)):
-    """Trả về dữ liệu QR cho giao dịch đang chờ xác nhận."""
-    gd = db.query(GiaoDichModel).filter(GiaoDichModel.ma_giao_dich == transaction_id).first()
-    if not gd:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy giao dịch")
-
-    qr_data = f"IBANKING|{transaction_id}|{gd.ma_nguoi_dung}|{float(gd.so_tien_giao_dich)}|TDTU"
     return {
-        "transaction_id": transaction_id,
-        "amount": float(gd.so_tien_giao_dich),
-        "merchant": "TDTU iBanking",
-        "qr_data": qr_data
+        "transaction_id": ma_giao_dich,
+        "message": "OTP đã được gửi đến email của bạn.",
+        "otp_expires_at": _iso_utc(otp.ThoiGianHetHan)
     }
 
-@app.post("/api/v1/payments/confirm", response_model=TransactionResponse, tags=["Payment"])
-async def confirm_payment(
+@app.post("/api/v1/payments/{transaction_id}/confirm", response_model=ConfirmPaymentResponse, tags=["Payment"])
+def confirm_payment(
+    transaction_id: str,
     request: ConfirmPaymentRequest,
-    idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
+    user_id: int = Depends(get_current_user_id),
     db: Session = Depends(get_db)
 ):
     """
-    Bước 2: Xác thực OTP và xử lý giao dịch thành công (Đảm bảo ACID, Concurrency & Idempotency-Key).
+    Xác nhận OTP, trừ tiền tài khoản, gạch nợ học phí và lưu lịch sử
     """
-    if idempotency_key:
-        ik_cache_key = f"CONFIRM:{idempotency_key.strip()}"
-        if ik_cache_key in IDEMPOTENCY_STORE:
-            cached_resp = dict(IDEMPOTENCY_STORE[ik_cache_key])
-            cached_resp["idempotent_replay"] = True
-            return cached_resp
+    # --- BƯỚC 1: Khoá giao dịch để 2 request confirm cùng lúc không xử lý trùng ---
+    gd = _get_own_transaction(db, transaction_id, user_id, lock=True)
 
-    now = datetime.utcnow()
-
-    try:
-        # 1. Khóa dòng giao dịch để kiểm tra trạng thái
-        gd = (
-            db.query(GiaoDichModel)
-            .filter(GiaoDichModel.ma_giao_dich == request.MaGiaoDich)
-            .with_for_update()
-            .first()
-        )
-        if not gd:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Không tìm thấy giao dịch"
-            )
-
-        if gd.trang_thai == "SUCCESS":
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Giao dịch này đã được thanh toán thành công trước đó"
-            )
-
-        if gd.trang_thai == "FAILED":
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Giao dịch này đã kết thúc hoặc bị từ chối trước đó"
-            )
-
-        # 2. Khóa và kiểm tra mã OTP gắn với giao dịch
-        otp_record = (
-            db.query(XacThucOTPModel)
-            .filter(
-                XacThucOTPModel.ma_giao_dich == request.MaGiaoDich,
-                XacThucOTPModel.ma_code == request.otp.strip()
-            )
-            .with_for_update()
-            .first()
-        )
-
-        if not otp_record:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Mã OTP không chính xác"
-            )
-
-        if otp_record.trang_thai != "CHUA_SU_DUNG":
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Mã OTP này đã được sử dụng hoặc không còn hiệu lực"
-            )
-
-        if now > otp_record.thoi_gian_het_han:
-            otp_record.trang_thai = "HET_HAN"
-            gd.trang_thai = "FAILED"
-            db.commit()
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Mã OTP đã hết hạn (quá 5 phút)"
-            )
-
-        # Đánh dấu OTP đã sử dụng ngay lập tức (Chỉ được dùng 1 lần)
-        otp_record.trang_thai = "DA_SU_DUNG"
-
-        # 3. PESSIMISTIC LOCKING (SELECT ... FOR UPDATE) TRÊN NGƯỜI DÙNG & KHOẢN HỌC PHÍ
-        user = (
-            db.query(UserModel)
-            .filter(UserModel.ma_nguoi_dung == gd.ma_nguoi_dung)
-            .with_for_update()
-            .first()
-        )
-        hp = (
-            db.query(HocPhiModel)
-            .filter(HocPhiModel.ma_hoc_phi == gd.ma_hoc_phi)
-            .with_for_update()
-            .first()
-        )
-
-        if not user or not hp:
-            gd.trang_thai = "FAILED"
-            db.commit()
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Không tìm thấy thông tin người dùng hoặc khoản học phí"
-            )
-
-        # --- TÌNH HUỐNG CONCURRENCY 2: Chống nhiều tài khoản thanh toán trùng 1 khoản học phí ---
-        if hp.trang_thai == "DA_DONG":
-            gd.trang_thai = "FAILED"
-            db.commit()
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Khoản học phí này đã được thanh toán thành công bởi một giao dịch khác!"
-            )
-
-        # --- TÌNH HUỐNG CONCURRENCY 1: Chống nhiều giao dịch đồng thời làm âm số dư ---
-        payment_amount = float(gd.so_tien_giao_dich)
-        current_balance = float(user.so_du)
-        if current_balance < payment_amount:
-            gd.trang_thai = "FAILED"
-            db.commit()
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Số dư khả dụng không đủ để thực hiện giao dịch!"
-            )
-
-        # 4. CẬP NHẬT DỮ LIỆU TRONG CÙNG 1 DATABASE TRANSACTION (ACID)
-        new_balance = current_balance - payment_amount
-        user.so_du = new_balance
-        hp.trang_thai = "DA_DONG"
-        gd.trang_thai = "SUCCESS"
-
-        # Lưu thông tin để gửi email xác nhận sau khi commit (gửi về Gmail đã nhập)
-        txn_id = gd.ma_giao_dich
-        user_email = (
-            request.email.strip()
-            if request.email and request.email.strip()
-            else user.email
-        )
-        user_full_name = user.ho_ten
-        student_mssv = hp.mssv
-        student_name = hp.ho_ten_sinh_vien
-        semester = hp.hoc_ky
-
-        db.commit()
-
-        # 5. Gửi Email biên lai xác nhận giao dịch thành công qua Gmail
-        confirm_email_body = (
-            f"Xin chào {user_full_name},\n\n"
-            f"Thông báo: Bạn đã đóng học phí THÀNH CÔNG trên hệ thống TDTU iBanking!\n"
-            f"Chi tiết biên lai giao dịch:\n"
-            f"- Mã giao dịch: {txn_id}\n"
-            f"- Mã số sinh viên: {student_mssv}\n"
-            f"- Họ và tên sinh viên: {student_name}\n"
-            f"- Học kỳ: {semester}\n"
-            f"- Số tiền đã thanh toán: {payment_amount:,.0f} VNĐ\n"
-            f"- Số dư khả dụng còn lại: {new_balance:,.0f} VNĐ\n"
-            f"- Thời gian hoàn tất: {now.strftime('%d/%m/%Y %H:%M:%S UTC')}\n"
-            f"- Trạng thái học phí: ĐÃ THANH TOÁN\n\n"
-            f"Cảm ơn bạn đã sử dụng dịch vụ TDTU iBanking!"
-        )
-        confirm_email_html = f"""
-        <div style="font-family: Arial, sans-serif; max-width: 560px; margin: 0 auto; border: 1px solid #28a745; border-radius: 8px; overflow: hidden;">
-            <div style="background-color: #28a745; color: white; padding: 16px 24px; font-size: 18px; font-weight: bold;">
-                TDTU iBanking - Biên Lai Xác Nhận Đã Đóng Học Phí
-            </div>
-            <div style="padding: 20px 24px; color: #333; line-height: 1.6;">
-                <p>Xin chào <strong>{user_full_name}</strong>,</p>
-                <p>Hệ thống xác nhận bạn đã thanh toán học phí thành công với thông tin biên lai dưới đây:</p>
-                <table style="width: 100%; border-collapse: collapse; margin: 12px 0;">
-                    <tr><td style="padding: 6px 0; color: #555;">Mã giao dịch:</td><td style="padding: 6px 0; font-weight: bold;">{txn_id}</td></tr>
-                    <tr><td style="padding: 6px 0; color: #555;">Mã số sinh viên:</td><td style="padding: 6px 0; font-weight: bold;">{student_mssv}</td></tr>
-                    <tr><td style="padding: 6px 0; color: #555;">Họ và tên sinh viên:</td><td style="padding: 6px 0; font-weight: bold;">{student_name}</td></tr>
-                    <tr><td style="padding: 6px 0; color: #555;">Học kỳ:</td><td style="padding: 6px 0; font-weight: bold;">{semester}</td></tr>
-                    <tr><td style="padding: 6px 0; color: #555;">Số tiền đã đóng:</td><td style="padding: 6px 0; font-weight: bold; color: #d9534f;">{payment_amount:,.0f} VNĐ</td></tr>
-                    <tr><td style="padding: 6px 0; color: #555;">Số dư khả dụng còn lại:</td><td style="padding: 6px 0; font-weight: bold; color: #28a745;">{new_balance:,.0f} VNĐ</td></tr>
-                    <tr><td style="padding: 6px 0; color: #555;">Trạng thái học phí:</td><td style="padding: 6px 0; font-weight: bold; color: #28a745;">ĐÃ ĐÓNG HỌC PHÍ</td></tr>
-                </table>
-                <p style="font-size: 13px; color: #666;">Vui lòng lưu giữ email biên lai này để đối chiếu khi cần thiết.</p>
-            </div>
-        </div>
-        """
-        send_email_notification(
-            to_email=user_email,
-            subject=f"[TDTU iBanking] Biên lai xác nhận đã đóng học phí thành công - {txn_id}",
-            body_text=confirm_email_body,
-            html_body=confirm_email_html
-        )
-
-        confirm_payload = {
-            "message": "Thanh toán học phí thành công! Email xác nhận đã được gửi.",
-            "transaction_id": request.MaGiaoDich,
-            "MaGiaoDich": request.MaGiaoDich,
-            "status": "SUCCESS",
-            "amount": payment_amount,
-            "new_balance": new_balance,
-            "mssv": student_mssv,
-            "student_name": student_name,
-            "semester": semester,
-            "email_sent_to": user_email,
-            "idempotency_key": idempotency_key,
-            "idempotent_replay": False
-        }
-        if idempotency_key:
-            IDEMPOTENCY_STORE[f"CONFIRM:{idempotency_key.strip()}"] = confirm_payload
-        return confirm_payload
-
-    except HTTPException:
-        raise
-    except Exception as e:
+    if gd.TrangThai != "PENDING":
         db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Lỗi hệ thống trong quá trình thanh toán: {str(e)}"
-        )
+        raise HTTPException(status_code=409, detail="Giao dịch này đã được xử lý trước đó")
 
-@app.get("/api/v1/payments/history/{user_id}", tags=["Payment"])
-@app.get("/api/v1/payment/history/{user_id}", tags=["Payment"])
-def get_payment_history(user_id: int, db: Session = Depends(get_db)):
-    """Lấy danh sách lịch sử giao dịch của người dùng kèm thông tin sinh viên/MSSV"""
-    results = (
-        db.query(GiaoDichModel, HocPhiModel)
-        .outerjoin(HocPhiModel, GiaoDichModel.ma_hoc_phi == HocPhiModel.ma_hoc_phi)
-        .filter(GiaoDichModel.ma_nguoi_dung == user_id)
-        .order_by(GiaoDichModel.thoi_gian_tao.desc())
+    otp = db.query(XacThucOTPModel).filter(
+        XacThucOTPModel.MaGiaoDich == transaction_id,
+        XacThucOTPModel.TrangThai == "CHUA_SU_DUNG"
+    ).first()
+
+    if not otp or datetime.utcnow() > otp.ThoiGianHetHan:
+        _fail_transaction(db, gd, status.HTTP_400_BAD_REQUEST,
+                          "Mã OTP đã hết hạn, vui lòng tạo giao dịch mới")
+
+    if otp.MaCode != request.otp:
+        otp.SoLanNhapSai += 1
+        if otp.SoLanNhapSai >= OTP_MAX_ATTEMPTS:
+            otp.TrangThai = "DA_SU_DUNG"
+            _fail_transaction(db, gd, status.HTTP_400_BAD_REQUEST,
+                              f"Bạn đã nhập sai OTP {OTP_MAX_ATTEMPTS} lần. Giao dịch đã bị huỷ.")
+        db.commit()
+        remaining = OTP_MAX_ATTEMPTS - otp.SoLanNhapSai
+        raise HTTPException(status_code=400, detail=f"Mã OTP không chính xác (còn {remaining} lần thử)")
+
+    # Vô hiệu hóa OTP ngay lập tức sau 1 lần dùng
+    otp.TrangThai = "DA_SU_DUNG"
+    gd.TrangThai = "PROCESSING"
+    gd.UpdatedAt = datetime.utcnow()
+    db.commit()
+    logger.info("Giao dịch %s: OTP hợp lệ -> PROCESSING, bắt đầu trừ tiền và gạch nợ", transaction_id)
+    result = _continue_payment(transaction_id)
+    if result is None:
+        raise HTTPException(status_code=409, detail="Giao dịch đã được xử lý")
+    return result
+
+@app.get("/api/v1/payments", response_model=List[TransactionDetail], tags=["Payment"])
+def get_payment_history(user_id: int = Depends(get_current_user_id), db: Session = Depends(get_db)):
+    """Lấy lịch sử giao dịch của người dùng đang đăng nhập"""
+    _expire_stale_transactions(db, user_id)
+    history = (
+        db.query(GiaoDichModel)
+        .filter(GiaoDichModel.MaNguoiDung == user_id)
+        .order_by(GiaoDichModel.NgayGiaoDich.desc())
         .all()
     )
+    return [_to_detail(item) for item in history]
 
-    return [
-        {
-            "MaGiaoDich": gd.ma_giao_dich,
-            "MaHocPhi": gd.ma_hoc_phi,
-            "MSSV": hp.mssv if hp else "N/A",
-            "HoTenSinhVien": hp.ho_ten_sinh_vien if hp else "N/A",
-            "HocKy": hp.hoc_ky if hp else "N/A",
-            "SoTienGiaoDich": float(gd.so_tien_giao_dich),
-            "NgayGiaoDich": gd.thoi_gian_tao.isoformat(),
-            "TrangThai": gd.trang_thai
-        }
-        for gd, hp in results
-    ]
-
-@app.post("/api/v1/payments/webhook/callback", tags=["Webhook & Idempotency"])
-def payment_webhook_callback(
-    payload: WebhookCallbackRequest,
-    idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
-    db: Session = Depends(get_db)
-):
-    """
-    Webhook Callback nhận thông báo trạng thái giao dịch (A -> B kèm Idempotency-Key).
-    Đảm bảo nếu đối tác gửi lại callback nhiều lần với cùng Idempotency-Key thì hệ thống chỉ xử lý 1 lần.
-    """
-    ik = (idempotency_key or f"WH_{payload.MaGiaoDich}_{payload.event_type}").strip()
-    cache_key = f"WEBHOOK:{ik}"
-    if cache_key in IDEMPOTENCY_STORE:
-        cached = dict(IDEMPOTENCY_STORE[cache_key])
-        cached["idempotent_replay"] = True
-        return cached
-
-    gd = db.query(GiaoDichModel).filter(GiaoDichModel.ma_giao_dich == payload.MaGiaoDich).first()
-    if not gd:
-        raise HTTPException(status_code=404, detail="Không tìm thấy giao dịch cho Webhook Callback")
-
-    resp = {
-        "webhook_status": "ACKNOWLEDGED",
-        "MaGiaoDich": gd.ma_giao_dich,
-        "transaction_status": gd.trang_thai,
-        "idempotency_key": ik,
-        "idempotent_replay": False
-    }
-    IDEMPOTENCY_STORE[cache_key] = resp
-    return resp
-
-@app.post("/api/v1/payments/demo/reset", tags=["Demo & Testing"])
-def reset_demo_data(db: Session = Depends(get_db)):
-    """
-    Khôi phục dữ liệu mẫu về trạng thái ban đầu để hỗ trợ chạy Concurrency Test & Demo nhiều lần trước Giảng viên.
-    """
-    try:
-        IDEMPOTENCY_STORE.clear()
-        db.query(XacThucOTPModel).delete()
-        db.query(GiaoDichModel).delete()
-
-        # Khôi phục số dư các tài khoản mẫu khớp với init.sql
-        balances = {
-            "khiem123": 10000000.00,
-            "phuc123": 10000000.00,
-            "nhi123": 10000000.00,
-            "nhu123": 10000000.00,
-        }
-        for username, bal in balances.items():
-            user = db.query(UserModel).filter(UserModel.ten_dang_nhap == username).first()
-            if user:
-                user.so_du = bal
-
-        # Khôi phục trạng thái học phí khớp với init.sql
-        tuition_statuses = {
-            "524K0011": "CHUA_DONG",
-            "523V0005": "CHUA_DONG",
-            "524K0006": "DA_DONG",
-            "524V0007": "CHUA_DONG",
-        }
-        for mssv, st in tuition_statuses.items():
-            hp = db.query(HocPhiModel).filter(HocPhiModel.mssv == mssv).first()
-            if hp:
-                hp.trang_thai = st
-
-        db.commit()
-        return {"status": "SUCCESS", "message": "Đã khôi phục dữ liệu mẫu về trạng thái ban đầu."}
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=f"Lỗi khi reset dữ liệu demo: {str(e)}")
-
+@app.get("/api/v1/payments/{transaction_id}", response_model=TransactionDetail, tags=["Payment"])
+def get_payment(transaction_id: str, user_id: int = Depends(get_current_user_id), db: Session = Depends(get_db)):
+    """Xem chi tiết một giao dịch (kèm thời điểm hết hạn OTP nếu đang chờ xác nhận)"""
+    _expire_stale_transactions(db, user_id)
+    gd = _get_own_transaction(db, transaction_id, user_id)
+    otp = None
+    if gd.TrangThai == "PENDING":
+        otp = db.query(XacThucOTPModel).filter(
+            XacThucOTPModel.MaGiaoDich == transaction_id,
+            XacThucOTPModel.TrangThai == "CHUA_SU_DUNG"
+        ).first()
+    return _to_detail(gd, otp)

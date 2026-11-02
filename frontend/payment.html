@@ -2,352 +2,247 @@
 <html lang="vi">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Xác thực OTP & Thanh toán - TDTU iBanking</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Xác thực giao dịch</title>
     <link rel="stylesheet" href="style.css">
-    <script src="config.js"></script>
 </head>
-<body>
-    <nav class="navbar">
-        <div class="brand">TDTU iBanking</div>
-        <div class="user-info">
-            <a href="tuition.html">🔙 Quay lại tra cứu</a>
-            | <a href="history.html">Lịch sử GD</a>
-        </div>
-    </nav>
-
-    <div class="page-container">
-        <div class="banking-card" style="max-width: 580px;">
-            <h2>Xác Thực Giao Dịch Bằng OTP</h2>
-            <div id="msg-box" class="alert" style="display: none;"></div>
-
-            <!-- BƯỚC 1: TÓM TẮT GIAO DỊCH -->
-            <div id="init-section">
-                <div class="section-box">
-                    <h3 class="section-title">Thông tin giao dịch</h3>
-                    <div class="detail-row">
-                        <span class="label">Người nộp tiền:</span>
-                        <span class="value" id="display-payer-name"></span>
-                    </div>
-                    <div class="detail-row">
-                        <span class="label">Số điện thoại:</span>
-                        <span class="value" id="display-payer-phone"></span>
-                    </div>
-                    <div class="detail-row">
-                        <span class="label">Email tài khoản:</span>
-                        <span class="value" id="display-payer-email"></span>
-                    </div>
-                    <div class="detail-row">
-                        <span class="label">Mã số sinh viên:</span>
-                        <span class="value" id="display-mssv"></span>
-                    </div>
-                    <div class="detail-row">
-                        <span class="label">Họ và tên sinh viên:</span>
-                        <span class="value" id="display-student-name"></span>
-                    </div>
-                    <div class="detail-row">
-                        <span class="label">Học kỳ:</span>
-                        <span class="value" id="display-semester"></span>
-                    </div>
-                    <div class="detail-row">
-                        <span class="label">Số dư khả dụng hiện tại:</span>
-                        <span class="value" style="color: var(--success-green);"><span id="display-balance"></span> VNĐ</span>
-                    </div>
-                    <div class="detail-row">
-                        <span class="label">Số tiền thanh toán:</span>
-                        <span class="value" style="color: var(--error-red); font-size: 18px;"><span id="display-amount"></span> VNĐ</span>
-                    </div>
-
-                    <div class="form-group" style="margin-top: 14px; margin-bottom: 4px;">
-                        <label for="recipientEmailInput">Địa chỉ Gmail nhận mã OTP</label>
-                        <input
-                            type="email"
-                            id="recipientEmailInput"
-                            class="form-control"
-                            placeholder="Nhập địa chỉ Gmail nhận mã OTP"
-                            required
-                        >
-                    </div>
+<body data-app-page="payment">
+    <div class="page-container top">
+        <div class="banking-card otp-card">
+            <div id="msg-box" class="alert"></div>
+            <div class="otp-transaction" id="transaction-summary">
+                <div class="detail-row">
+                    <span class="label">Mã giao dịch</span><span class="value" id="txnId"></span>
                 </div>
-                <button id="btnSendOtp" onclick="initPayment()" class="btn-primary">
-                    Gửi mã OTP qua Email & Tiếp tục
-                </button>
+                <div class="detail-row">
+                    <span class="label">Sinh viên</span><span class="value" id="student"></span>
+                </div>
+                <div class="detail-row">
+                    <span class="label">Số tiền</span><span class="value" id="amount"></span>
+                </div>
             </div>
 
-            <!-- BƯỚC 2: NHẬP MÃ OTP XÁC THỰC -->
             <div id="otp-section" style="display: none;">
-                <div class="section-box">
-                    <div class="detail-row">
-                        <span class="label">Mã giao dịch:</span>
-                        <span class="value" id="otp-transaction-id"></span>
+                <div class="otp-content">
+                    <span class="otp-symbol" aria-hidden="true">?</span>
+                    <h2>Xác minh giao dịch</h2>
+                    <p>Mã OTP được gửi đến email <b id="payerEmail"></b></p>
+                    <p class="otp-note">Vui lòng nhập mã xác thực để tiếp tục.</p>
+                    <div class="countdown">Mã có hiệu lực trong <b id="countdown">05:00</b></div>
+                    <div class="form-group">
+                        <input type="text" id="otpCode" class="form-control otp-input" maxlength="6"
+                               inputmode="numeric" autocomplete="one-time-code" placeholder="••••••" aria-label="Mã OTP gồm 6 chữ số">
                     </div>
-                    <div class="detail-row">
-                        <span class="label">Email nhận OTP:</span>
-                        <span class="value" id="otp-email-target"></span>
-                    </div>
-                    <div class="detail-row">
-                        <span class="label">Thời gian hiệu lực còn lại:</span>
-                        <span class="value" style="color: var(--error-red);" id="otp-countdown">05:00</span>
-                    </div>
+                    <button id="confirmBtn" class="btn-primary" disabled>Xác minh & thanh toán</button>
+                    <p class="otp-privacy">Không chia sẻ mã OTP. Mỗi mã chỉ xác thực thành công một lần.</p>
                 </div>
-
-                <div id="simulated-email-box" class="email-preview-box" style="display: none;">
-                    <div><strong>📧 Thông báo mã OTP đã gửi tới <span id="demo-email-address"></span>:</strong></div>
-                    <div style="margin-top: 4px;">Mã OTP của giao dịch <code id="demo-txn-code"></code> là: <strong id="demo-otp-code" style="font-size: 18px; color: var(--primary-blue);"></strong></div>
-                </div>
-
-                <div class="form-group" style="text-align: center; margin-top: 15px;">
-                    <label style="font-size: 15px; margin-bottom: 10px;">
-                        Nhập mã xác thực OTP
-                    </label>
-                    <input type="text" id="otpCode" maxlength="6" class="form-control" placeholder="••••••" style="text-align: center; font-size: 22px; letter-spacing: 6px; font-weight: bold;" required>
-                </div>
-                <button id="btnConfirmOtp" onclick="confirmPayment()" class="btn-primary">
-                    Xác nhận thanh toán lần cuối
-                </button>
             </div>
 
-            <!-- BƯỚC 3: BIÊN LAI KẾT QUẢ GIAO DỊCH THÀNH CÔNG -->
-            <div id="receipt-section" style="display: none;">
-                <div class="section-box" style="border-color: var(--success-green); background: #f6fff8;">
-                    <h3 class="section-title" style="color: var(--success-green);">✓ Biên lai Thanh toán Học phí Thành công</h3>
-                    <div class="detail-row">
-                        <span class="label">Mã giao dịch:</span>
-                        <span class="value" id="receipt-txn-id"></span>
-                    </div>
-                    <div class="detail-row">
-                        <span class="label">Mã số sinh viên:</span>
-                        <span class="value" id="receipt-mssv"></span>
-                    </div>
-                    <div class="detail-row">
-                        <span class="label">Họ và tên sinh viên:</span>
-                        <span class="value" id="receipt-student"></span>
-                    </div>
-                    <div class="detail-row">
-                        <span class="label">Học kỳ:</span>
-                        <span class="value" id="receipt-semester"></span>
-                    </div>
-                    <div class="detail-row">
-                        <span class="label">Số tiền đã trừ:</span>
-                        <span class="value" style="color: var(--error-red);"><span id="receipt-amount"></span> VNĐ</span>
-                    </div>
-                    <div class="detail-row">
-                        <span class="label">Số dư khả dụng mới:</span>
-                        <span class="value" style="color: var(--success-green);"><span id="receipt-new-balance"></span> VNĐ</span>
-                    </div>
-                    <div class="detail-row">
-                        <span class="label">Trạng thái học phí:</span>
-                        <span class="value" style="color: var(--success-green);">ĐÃ THANH TOÁN</span>
-                    </div>
-                    <div class="detail-row">
-                        <span class="label">Email xác nhận:</span>
-                        <span class="value" id="receipt-email"></span>
+            <div id="result-section" class="result" style="display: none;">
+                <div class="result-icon" id="result-icon"></div>
+                <h3 id="result-title"></h3>
+                <p id="result-text"></p>
+                <div class="receipt-box">
+                    <div class="detail-row"><span class="label">Mã giao dịch</span><span class="value" id="receipt-txn"></span></div>
+                    <div class="detail-row"><span class="label">Người nộp tiền</span><span class="value" id="receipt-payer"></span></div>
+                    <div class="detail-row"><span class="label">Sinh viên</span><span class="value" id="receipt-student"></span></div>
+                    <div class="detail-row"><span class="label">Số tiền</span><span class="value" id="receipt-amount"></span></div>
+                    <div class="detail-row"><span class="label">Thời gian</span><span class="value" id="receipt-date"></span></div>
+                    <div id="result-balance" class="detail-row" style="display: none;">
+                        <span class="label">Số dư sau giao dịch</span><span class="value" id="new-balance"></span>
                     </div>
                 </div>
-                <div style="display: flex; gap: 10px;">
-                    <button onclick="window.location.href='history.html'" class="btn-primary">Xem Lịch sử giao dịch</button>
-                    <button onclick="window.location.href='tuition.html'" class="btn-secondary">Tiếp tục tra cứu khác</button>
+                <div class="receipt-actions">
+                    <a class="btn-secondary" href="history.html">Xem lịch sử</a>
+                    <a class="btn-primary" href="dashboard.html">Về trang tổng quan</a>
                 </div>
             </div>
         </div>
     </div>
 
+    <script src="common.js"></script>
     <script>
-        const token = sessionStorage.getItem('token');
-        if (!token) {
-            window.location.href = 'login.html';
-        }
+        const txnId = new URLSearchParams(window.location.search).get('txn');
+        const msgBox = document.getElementById('msg-box');
+        const otpInput = document.getElementById('otpCode');
+        const confirmBtn = document.getElementById('confirmBtn');
+        let countdownTimer = null;
+        let expiryCheckInProgress = false;
 
-        const payerName = sessionStorage.getItem('HoTenNguoiNop') || '';
-        const payerPhone = sessionStorage.getItem('SoDienThoaiNguoiNop') || '';
-        const payerEmail = sessionStorage.getItem('EmailNguoiNop') || '';
-        const recipientEmailSaved = sessionStorage.getItem('pay_RecipientEmail') || '';
-        const balance = Number(sessionStorage.getItem('SoDuKhaDung') || 0);
-        const mssv = sessionStorage.getItem('pay_MSSV') || '';
-        const studentName = sessionStorage.getItem('pay_StudentName') || '';
-        const semester = sessionStorage.getItem('pay_HocKy') || '';
-        const amount = Number(sessionStorage.getItem('pay_Amount') || 0);
+        if (requireLogin()) init();
 
-        document.getElementById('display-payer-name').innerText = payerName;
-        document.getElementById('display-payer-phone').innerText = payerPhone;
-        document.getElementById('display-payer-email').innerText = payerEmail;
-        document.getElementById('display-mssv').innerText = mssv;
-        document.getElementById('display-student-name').innerText = studentName;
-        document.getElementById('display-semester').innerText = semester;
-        document.getElementById('display-balance').innerText = balance.toLocaleString('vi-VN');
-        document.getElementById('display-amount').innerText = amount.toLocaleString('vi-VN');
-        document.getElementById('recipientEmailInput').value = recipientEmailSaved;
-
-        let countdownInterval = null;
-
-        function showMsg(text, isError) {
-            const msgBox = document.getElementById('msg-box');
-            msgBox.innerText = text;
-            msgBox.className = isError ? 'alert alert-error' : 'alert alert-success';
-            msgBox.style.display = 'block';
-        }
-
-        function startCountdown(seconds) {
-            clearInterval(countdownInterval);
-            let remaining = seconds;
-            const el = document.getElementById('otp-countdown');
-            countdownInterval = setInterval(() => {
-                remaining--;
-                if (remaining <= 0) {
-                    clearInterval(countdownInterval);
-                    el.innerText = "00:00";
-                    showMsg("Mã OTP đã hết thời hạn 5 phút! Vui lòng quay lại khởi tạo giao dịch mới.", true);
-                    return;
-                }
-                const mins = String(Math.floor(remaining / 60)).padStart(2, '0');
-                const secs = String(remaining % 60).padStart(2, '0');
-                el.innerText = `${mins}:${secs}`;
-            }, 1000);
-        }
-
-        async function initPayment() {
-            const msgBox = document.getElementById('msg-box');
-            msgBox.style.display = 'none';
-
-            const MaNguoiDung = Number(sessionStorage.getItem('MaNguoiDung'));
-            const MaHocPhi = Number(sessionStorage.getItem('pay_MaHocPhi'));
-            const recipientEmail = document.getElementById('recipientEmailInput').value.trim();
-
-            if (!MaNguoiDung || !MaHocPhi) {
-                return showMsg("Dữ liệu thanh toán không hợp lệ, vui lòng quay lại trang tra cứu!", true);
+        async function init() {
+            if (!txnId) {
+                window.location.href = 'tuition.html';
+                return;
             }
 
-            if (!recipientEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipientEmail)) {
-                return showMsg("Vui lòng nhập địa chỉ Gmail hợp lệ để nhận mã OTP!", true);
-            }
-
-            sessionStorage.setItem('pay_RecipientEmail', recipientEmail);
-
-            const btn = document.getElementById('btnSendOtp');
-            btn.disabled = true;
-            btn.innerText = "Đang khởi tạo giao dịch & gửi OTP...";
+            otpInput.addEventListener('input', () => {
+                otpInput.value = otpInput.value.replace(/\D/g, '');
+                confirmBtn.disabled = otpInput.value.length !== 6;
+            });
+            otpInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' && !confirmBtn.disabled) confirmPayment();
+            });
+            confirmBtn.addEventListener('click', confirmPayment);
 
             try {
-                const initIK = sessionStorage.getItem('current_Init_IK') || (window.IBANKING_CONFIG ? window.IBANKING_CONFIG.generateIdempotencyKey('IK_INIT') : `IK_INIT_${Date.now()}`);
-                sessionStorage.setItem('current_Init_IK', initIK);
+                const [gd, me] = await Promise.all([
+                    apiFetch(`${API_BASE}/payments/${encodeURIComponent(txnId)}`),
+                    apiFetch(`${API_BASE}/users/me`)
+                ]);
+                document.getElementById('txnId').innerText = gd.MaGiaoDich;
+                document.getElementById('student').innerText = `${gd.MSSV} - ${gd.TenSinhVien}`;
+                document.getElementById('amount').innerText = formatVND(gd.SoTienGiaoDich);
+                document.getElementById('payerEmail').innerText = me.email;
+                document.getElementById('receipt-txn').innerText = gd.MaGiaoDich;
+                document.getElementById('receipt-payer').innerText = me.full_name;
+                document.getElementById('receipt-student').innerText = `${gd.TenSinhVien} · ${gd.MSSV}`;
+                document.getElementById('receipt-amount').innerText = formatVND(gd.SoTienGiaoDich);
+                document.getElementById('receipt-date').innerText = new Date(gd.NgayGiaoDich).toLocaleString('vi-VN');
 
-                const res = await fetch('http://localhost:8003/api/v1/payments/initiate', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Idempotency-Key': initIK
-                    },
-                    body: JSON.stringify({
-                        MaNguoiDung: MaNguoiDung,
-                        MaHocPhi: MaHocPhi,
-                        email: recipientEmail
-                    })
-                });
-
-                const data = await res.json().catch(() => ({}));
-
-                if (!res.ok) {
-                    btn.disabled = false;
-                    btn.innerText = "Gửi mã OTP qua Email & Tiếp tục";
-                    return showMsg(data.detail || "Không thể khởi tạo giao dịch", true);
-                }
-
-                const transactionId = data.MaGiaoDich || data.transaction_id;
-                const targetEmail = data.email || recipientEmail;
-                sessionStorage.setItem('current_MaGiaoDich', transactionId);
-
-                document.getElementById('init-section').style.display = 'none';
-                document.getElementById('otp-section').style.display = 'block';
-                document.getElementById('otp-transaction-id').innerText = transactionId;
-                document.getElementById('otp-email-target').innerText = targetEmail;
-
-                if (data.smtp_sent) {
-                    document.getElementById('simulated-email-box').style.display = 'none';
-                    showMsg(`Mã OTP đã được gửi thành công tới hộp thư Gmail: ${targetEmail}. Vui lòng kiểm tra hộp thư đến của bạn!`, false);
+                if (gd.TrangThai === 'PENDING') {
+                    document.getElementById('otp-section').style.display = 'block';
+                    startCountdown(gd.otp_expires_at);
+                    otpInput.focus();
+                } else if (gd.TrangThai === 'SUCCESS') {
+                    showResult(true, 'Giao dịch này đã được thanh toán thành công.');
+                } else if (gd.TrangThai === 'PROCESSING') {
+                    document.getElementById('transaction-summary').style.display = 'none';
+                    document.getElementById('result-section').style.display = 'block';
+                    document.getElementById('result-title').innerText = 'Đang khôi phục giao dịch';
+                    document.getElementById('result-text').innerText = 'Vui lòng chờ trong khi hệ thống kiểm tra kết quả thanh toán.';
+                    pollRecovery();
+                } else if (gd.TrangThai === 'FAILED') {
+                    failAndReturnToDashboard('Giao dịch đã bị hủy hoặc hết hạn. Vui lòng tạo giao dịch mới nếu cần.');
                 } else {
-                    document.getElementById('simulated-email-box').style.display = 'block';
-                    document.getElementById('demo-email-address').innerText = targetEmail;
-                    document.getElementById('demo-txn-code').innerText = transactionId;
-                    document.getElementById('demo-otp-code').innerText = data.otp_demo || '';
-                    showMsg(`Chưa cấu hình SMTP_USER / SMTP_PASSWORD trong file .env nên hiển thị mã OTP trực tiếp trên màn hình.`, false);
+                    showResult(false, 'Giao dịch không thành công hoặc mã OTP đã hết hạn.');
                 }
-
-                startCountdown(data.expires_in_seconds || 300);
             } catch (err) {
-                console.error(err);
-                btn.disabled = false;
-                btn.innerText = "Gửi mã OTP qua Email & Tiếp tục";
-                showMsg("Không thể kết nối tới dịch vụ thanh toán!", true);
+                showAlert(msgBox, err.message);
             }
+        }
+
+        function startCountdown(expiresAt) {
+            const end = new Date(expiresAt).getTime();
+            const tick = () => {
+                const left = Math.max(0, Math.floor((end - Date.now()) / 1000));
+                const mm = String(Math.floor(left / 60)).padStart(2, '0');
+                const ss = String(left % 60).padStart(2, '0');
+                document.getElementById('countdown').innerText = `${mm}:${ss}`;
+                if (left === 0) {
+                    clearInterval(countdownTimer);
+                    countdownTimer = null;
+                    if (!expiryCheckInProgress) {
+                        expiryCheckInProgress = true;
+                        expireAndReturnToDashboard();
+                    }
+                }
+            };
+            tick();
+            if (!expiryCheckInProgress) countdownTimer = setInterval(tick, 1000);
+        }
+
+        async function expireAndReturnToDashboard() {
+            try {
+                const gd = await apiFetch(`${API_BASE}/payments/${encodeURIComponent(txnId)}`);
+                if (gd.TrangThai === 'PENDING') {
+                    expiryCheckInProgress = false;
+                    setTimeout(() => {
+                        expiryCheckInProgress = true;
+                        expireAndReturnToDashboard();
+                    }, 1000);
+                    return;
+                }
+                failAndReturnToDashboard('Mã OTP đã hết hạn. Giao dịch đã bị hủy.');
+            } catch (err) {
+                expiryCheckInProgress = false;
+                showAlert(msgBox, `Không thể xác nhận trạng thái giao dịch: ${err.message}`);
+                setTimeout(() => {
+                    expiryCheckInProgress = true;
+                    expireAndReturnToDashboard();
+                }, 3000);
+            }
+        }
+
+        function failAndReturnToDashboard(message) {
+            showResult(false, message);
+            setTimeout(() => {
+                window.location.href = 'dashboard.html';
+            }, 2500);
         }
 
         async function confirmPayment() {
-            const msgBox = document.getElementById('msg-box');
-            msgBox.style.display = 'none';
-
-            const MaGiaoDich = sessionStorage.getItem('current_MaGiaoDich');
-            const otp = document.getElementById('otpCode').value.trim();
-            const recipientEmail = sessionStorage.getItem('pay_RecipientEmail') || document.getElementById('recipientEmailInput').value.trim();
-
-            if (!otp) {
-                return showMsg("Vui lòng nhập mã OTP!", true);
-            }
-
-            const btn = document.getElementById('btnConfirmOtp');
-            btn.disabled = true;
-            btn.innerText = "Đang xử lý giao dịch...";
+            hideAlert(msgBox);
+            confirmBtn.disabled = true;
+            confirmBtn.innerText = 'Đang xử lý...';
 
             try {
-                const confirmIK = sessionStorage.getItem('current_Confirm_IK') || `IK_CONFIRM_${MaGiaoDich}`;
-                sessionStorage.setItem('current_Confirm_IK', confirmIK);
-
-                const res = await fetch('http://localhost:8003/api/v1/payments/confirm', {
+                const data = await apiFetch(`${API_BASE}/payments/${encodeURIComponent(txnId)}/confirm`, {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Idempotency-Key': confirmIK
-                    },
-                    body: JSON.stringify({
-                        MaGiaoDich: MaGiaoDich,
-                        otp: otp,
-                        email: recipientEmail
-                    })
+                    body: { otp: otpInput.value }
                 });
-
-                const data = await res.json().catch(() => ({}));
-
-                if (!res.ok) {
-                    btn.disabled = false;
-                    btn.innerText = "Xác nhận thanh toán lần cuối";
-                    return showMsg(data.detail || "Xác thực giao dịch thất bại!", true);
-                }
-
-                clearInterval(countdownInterval);
-                document.getElementById('otp-section').style.display = 'none';
-                document.getElementById('receipt-section').style.display = 'block';
-
-                const newBal = Number(data.new_balance ?? (balance - amount));
-                sessionStorage.setItem('SoDuKhaDung', newBal);
-
-                document.getElementById('receipt-txn-id').innerText = data.MaGiaoDich || MaGiaoDich;
-                document.getElementById('receipt-mssv').innerText = data.mssv || mssv;
-                document.getElementById('receipt-student').innerText = data.student_name || studentName;
-                document.getElementById('receipt-semester').innerText = data.semester || semester;
-                document.getElementById('receipt-amount').innerText = Number(data.amount || amount).toLocaleString('vi-VN');
-                document.getElementById('receipt-new-balance').innerText = newBal.toLocaleString('vi-VN');
-                document.getElementById('receipt-email').innerText = data.email_sent_to || recipientEmail;
-
-                showMsg(data.message || "Thanh toán học phí thành công!", false);
-
-                sessionStorage.removeItem('current_MaGiaoDich');
-                sessionStorage.removeItem('current_Init_IK');
-                sessionStorage.removeItem('current_Confirm_IK');
-                sessionStorage.removeItem('pay_MaHocPhi');
+                showResult(true, 'Học phí đã được thanh toán. Email xác nhận đã được gửi đến hộp thư của bạn.', data.new_balance);
             } catch (err) {
-                console.error(err);
-                btn.disabled = false;
-                btn.innerText = "Xác nhận thanh toán lần cuối";
-                showMsg("Không thể kết nối tới dịch vụ thanh toán!", true);
+                // Kiểm tra lại trạng thái: còn PENDING (sai OTP, còn lượt) thì cho nhập lại,
+                // ngược lại giao dịch đã kết thúc -> hiển thị kết quả thất bại
+                let stillPending = false;
+                let currentStatus = null;
+                try {
+                    const gd = await apiFetch(`${API_BASE}/payments/${encodeURIComponent(txnId)}`);
+                    stillPending = gd.TrangThai === 'PENDING';
+                    currentStatus = gd.TrangThai;
+                } catch (e) { /* bỏ qua, hiển thị lỗi gốc */ }
+
+                if (stillPending) {
+                    showAlert(msgBox, err.message);
+                    otpInput.value = '';
+                    otpInput.focus();
+                    confirmBtn.innerText = 'Xác minh & thanh toán';
+                } else if (currentStatus === 'PROCESSING') {
+                    showAlert(msgBox, 'Giao dịch đang chờ service khôi phục. Trang sẽ tự cập nhật kết quả.');
+                    pollRecovery();
+                } else if (currentStatus === 'FAILED') {
+                    failAndReturnToDashboard(err.message || 'Giao dịch đã bị hủy.');
+                } else {
+                    showResult(false, err.message);
+                }
+            }
+        }
+
+        async function pollRecovery() {
+            try {
+                const gd = await apiFetch(`${API_BASE}/payments/${encodeURIComponent(txnId)}`);
+                if (gd.TrangThai === 'SUCCESS') {
+                    showResult(true, 'Giao dịch đã được xử lý thành công.');
+                    return;
+                }
+                if (gd.TrangThai === 'FAILED') {
+                    showResult(false, 'Giao dịch không thành công. Vui lòng kiểm tra lịch sử giao dịch.');
+                    return;
+                }
+            } catch (e) {
+                showAlert(msgBox, e.message);
+            }
+            setTimeout(pollRecovery, 2000);
+        }
+
+        function showResult(success, text, newBalance) {
+            clearInterval(countdownTimer);
+            hideAlert(msgBox);
+            document.getElementById('otp-section').style.display = 'none';
+            document.getElementById('transaction-summary').style.display = 'none';
+            document.getElementById('result-section').style.display = 'block';
+            const resultIcon = document.getElementById('result-icon');
+            resultIcon.innerText = success ? '✓' : '×';
+            resultIcon.style.background = success ? '#e5f7ef' : '#fff0f2';
+            resultIcon.style.color = success ? 'var(--success-green)' : 'var(--error-red)';
+            document.getElementById('result-title').innerText = success ? 'Thanh toán thành công' : 'Giao dịch không thành công';
+            document.getElementById('result-title').style.color = success ? 'var(--success-green)' : 'var(--error-red)';
+            document.getElementById('result-text').innerText = text;
+            if (newBalance !== undefined) {
+                document.getElementById('result-balance').style.display = 'flex';
+                document.getElementById('new-balance').innerText = formatVND(newBalance);
             }
         }
     </script>

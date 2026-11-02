@@ -2,92 +2,138 @@
 <html lang="vi">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Lịch sử giao dịch - TDTU iBanking</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Lịch sử giao dịch · TDTU iBanking</title>
     <link rel="stylesheet" href="style.css">
 </head>
-<body>
-    <nav class="navbar">
-        <div class="brand">TDTU iBanking</div>
-        <div class="user-info">
-            <a href="tuition.html">🔙 Quay lại Tra cứu & Thanh toán</a>
-            | <a href="login.html" onclick="sessionStorage.clear()">Đăng xuất</a>
-        </div>
-    </nav>
-
+<body data-app-page="history">
     <div class="page-container">
-        <div class="banking-card" style="max-width: 850px;">
-            <h2>Lịch Sử Giao Dịch Đã Thực Hiện</h2>
-            <div style="overflow-x: auto;">
-                <table style="width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 14px;">
+        <div id="msg-box" class="alert"></div>
+        <section class="history-panel">
+            <div class="detail-row" style="padding-top:0;margin-bottom:12px">
+                <span class="label">Số dư khả dụng hiện tại</span><strong class="value" id="balance">Đang tải...</strong>
+            </div>
+            <div class="history-toolbar">
+                <input class="form-control" id="history-search" type="search" placeholder="Tìm mã giao dịch hoặc sinh viên">
+                <select class="form-control" id="history-status" aria-label="Lọc theo trạng thái">
+                    <option value="">Tất cả trạng thái</option>
+                    <option value="SUCCESS">Thành công</option>
+                    <option value="PENDING">Chờ xác thực OTP</option>
+                    <option value="PROCESSING">Đang xử lý</option>
+                    <option value="FAILED">Thất bại</option>
+                </select>
+                <select class="form-control" id="history-range" aria-label="Lọc theo thời gian">
+                    <option value="0">Toàn bộ thời gian</option>
+                    <option value="30">30 ngày gần đây</option>
+                    <option value="90">90 ngày gần đây</option>
+                </select>
+            </div>
+            <div class="history-scroll">
+                <table class="history-table">
                     <thead>
-                        <tr style="background: #f1f4f9; text-align: left; border-bottom: 2px solid var(--border-color);">
-                            <th style="padding: 10px;">Mã Giao Dịch</th>
-                            <th style="padding: 10px;">MSSV & Sinh Viên</th>
-                            <th style="padding: 10px;">Học Kỳ</th>
-                            <th style="padding: 10px;">Số Tiền</th>
-                            <th style="padding: 10px;">Thời Gian</th>
-                            <th style="padding: 10px;">Trạng Thái</th>
-                        </tr>
+                        <tr><th>Mã giao dịch</th><th>Sinh viên</th><th>Thời gian</th><th style="text-align:right">Số tiền</th><th>Trạng thái</th></tr>
                     </thead>
-                    <tbody id="history-body"></tbody>
+                    <tbody id="history-body"><tr><td colspan="5">Đang tải lịch sử...</td></tr></tbody>
                 </table>
             </div>
-        </div>
+            <div class="empty-state" id="history-empty" style="display:none">
+                <span class="stat-icon">▤</span>
+                <h3 id="history-empty-title">Chưa có giao dịch nào</h3>
+                <p id="history-empty-description">Bắt đầu đóng học phí để xem lịch sử tại đây.</p>
+                <a class="btn-primary" href="tuition.html">Đóng học phí đầu tiên</a>
+            </div>
+        </section>
+        <section class="panel" id="transaction-detail" style="display:none;margin-top:16px">
+            <h2>Chi tiết giao dịch</h2>
+            <div class="receipt-box">
+                <div class="detail-row"><span class="label">Mã giao dịch</span><span class="value" id="detail-id"></span></div>
+                <div class="detail-row"><span class="label">Sinh viên</span><span class="value" id="detail-student"></span></div>
+                <div class="detail-row"><span class="label">Thời gian</span><span class="value" id="detail-time"></span></div>
+                <div class="detail-row"><span class="label">Số tiền</span><span class="value" id="detail-amount"></span></div>
+                <div class="detail-row"><span class="label">Trạng thái</span><span class="value" id="detail-status"></span></div>
+            </div>
+        </section>
     </div>
 
-<script>
-    const token = sessionStorage.getItem('token');
-    if (!token) {
-        window.location.href = 'login.html';
-    }
+    <script src="common.js"></script>
+    <script>
+        const historyBody = document.getElementById('history-body');
+        let allTransactions = [];
 
-    async function loadHistory() {
-        const MaNguoiDung = sessionStorage.getItem('MaNguoiDung');
-        const body = document.getElementById('history-body');
+        if (requireLogin()) loadHistory();
+        document.getElementById('history-search').addEventListener('input', renderHistory);
+        document.getElementById('history-status').addEventListener('change', renderHistory);
+        document.getElementById('history-range').addEventListener('change', renderHistory);
 
-        if (!MaNguoiDung) {
-            body.innerHTML = `<tr><td colspan="6" style="text-align: center; padding: 14px; color: red;">Vui lòng đăng nhập để xem lịch sử!</td></tr>`;
-            return;
+        async function loadHistory() {
+            try {
+                const [me, transactions] = await Promise.all([
+                    apiFetch(`${API_BASE}/users/me`),
+                    apiFetch(`${API_BASE}/payments`)
+                ]);
+                document.getElementById('balance').innerText = formatVND(me.available_balance);
+                allTransactions = transactions;
+                renderHistory();
+            } catch (err) {
+                showAlert(document.getElementById('msg-box'), err.message);
+                historyBody.innerHTML = '';
+            }
         }
 
-        try {
-            const res = await fetch(`http://localhost:8003/api/v1/payments/history/${MaNguoiDung}`);
-            if (!res.ok) {
-                throw new Error('Không thể tải lịch sử giao dịch');
-            }
-
-            const data = await res.json();
-
-            if (!Array.isArray(data) || data.length === 0) {
-                body.innerHTML = `<tr><td colspan="6" style="text-align: center; padding: 16px; color: #666;">Chưa có lịch sử giao dịch nào.</td></tr>`;
+        function renderHistory() {
+            const query = document.getElementById('history-search').value.trim().toLocaleLowerCase('vi');
+            const status = document.getElementById('history-status').value;
+            const days = Number(document.getElementById('history-range').value);
+            const cutoff = days ? Date.now() - days * 24 * 60 * 60 * 1000 : 0;
+            const filtered = allTransactions.filter(item => {
+                const searchable = `${item.MaGiaoDich} ${item.MSSV} ${item.TenSinhVien}`.toLocaleLowerCase('vi');
+                return (!query || searchable.includes(query))
+                    && (!status || item.TrangThai === status)
+                    && (!cutoff || new Date(item.NgayGiaoDich).getTime() >= cutoff);
+            });
+            const empty = document.getElementById('history-empty');
+            if (!filtered.length) {
+                historyBody.innerHTML = '';
+                empty.style.display = 'block';
+                document.getElementById('history-empty-title').innerText = allTransactions.length ? 'Không tìm thấy giao dịch' : 'Chưa có giao dịch nào';
+                document.getElementById('history-empty-description').innerText = allTransactions.length
+                    ? 'Thử thay đổi từ khóa hoặc bộ lọc của bạn.'
+                    : 'Bắt đầu đóng học phí để xem lịch sử tại đây.';
+                empty.querySelector('a').style.display = allTransactions.length ? 'none' : 'inline-flex';
                 return;
             }
-
-            body.innerHTML = data.map(g => {
-                const amount = Number(g.SoTienGiaoDich ?? g.SoTien ?? 0);
-                const dateValue = g.NgayGiaoDich ?? g.ThoiGian ?? null;
-                const dateText = dateValue ? new Date(dateValue).toLocaleString('vi-VN') : 'N/A';
-                const statusColor = g.TrangThai === 'SUCCESS' ? 'var(--success-green)' : (g.TrangThai === 'PENDING' ? '#e67e22' : 'var(--error-red)');
-
-                return `
-                    <tr style="border-bottom: 1px solid #eee;">
-                        <td style="padding: 10px; font-family: monospace; font-weight: 600;">${g.MaGiaoDich}</td>
-                        <td style="padding: 10px;"><strong>${g.MSSV || ''}</strong> - ${g.HoTenSinhVien || ''}</td>
-                        <td style="padding: 10px;">${g.HocKy || ''}</td>
-                        <td style="padding: 10px; font-weight: bold;">${Number.isFinite(amount) ? amount.toLocaleString('vi-VN') : '0'} VNĐ</td>
-                        <td style="padding: 10px;">${dateText}</td>
-                        <td style="padding: 10px; font-weight: bold; color: ${statusColor};">${g.TrangThai}</td>
-                    </tr>
-                `;
-            }).join('');
-        } catch (error) {
-            console.error(error);
-            body.innerHTML = `<tr><td colspan="6" style="text-align: center; padding: 14px; color: red;">Lỗi kết nối tới Payment Service (Port 8003)!</td></tr>`;
+            empty.style.display = 'none';
+            historyBody.innerHTML = filtered.map((item, index) => `
+                <tr tabindex="0" role="button" data-index="${index}" aria-label="Xem chi tiết giao dịch ${escapeHtml(item.MaGiaoDich)}">
+                    <td title="${escapeHtml(item.MaGiaoDich)}">${escapeHtml(item.MaGiaoDich)}</td>
+                    <td>${escapeHtml(item.TenSinhVien)} · ${escapeHtml(item.MSSV)}</td>
+                    <td>${new Date(item.NgayGiaoDich).toLocaleString('vi-VN')}</td>
+                    <td class="history-amount">${formatVND(item.SoTienGiaoDich)}</td>
+                    <td><span class="status-badge status-${escapeHtml(item.TrangThai)}">${escapeHtml(STATUS_LABELS[item.TrangThai] || item.TrangThai)}</span></td>
+                </tr>
+            `).join('');
+            historyBody.querySelectorAll('tr[data-index]').forEach((row, index) => {
+                const selectRow = () => showTransaction(filtered[index]);
+                row.addEventListener('click', selectRow);
+                row.addEventListener('keydown', event => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        selectRow();
+                    }
+                });
+            });
         }
-    }
 
-    loadHistory();
-</script>
+        function showTransaction(item) {
+            const detail = document.getElementById('transaction-detail');
+            detail.style.display = 'block';
+            document.getElementById('detail-id').innerText = item.MaGiaoDich;
+            document.getElementById('detail-student').innerText = `${item.TenSinhVien} · ${item.MSSV}`;
+            document.getElementById('detail-time').innerText = new Date(item.NgayGiaoDich).toLocaleString('vi-VN');
+            document.getElementById('detail-amount').innerText = formatVND(item.SoTienGiaoDich);
+            document.getElementById('detail-status').innerHTML = `<span class="status-badge status-${escapeHtml(item.TrangThai)}">${escapeHtml(STATUS_LABELS[item.TrangThai] || item.TrangThai)}</span>`;
+            detail.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+    </script>
 </body>
 </html>

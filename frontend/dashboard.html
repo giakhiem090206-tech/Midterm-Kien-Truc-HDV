@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Tổng quan · TDTU iBanking</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body data-app-page="dashboard">
+    <div class="page-container">
+        <div id="dashboard-error" class="alert"></div>
+        <section class="stat-grid" aria-label="Tổng quan tài khoản">
+            <article class="stat-card">
+                <span class="stat-icon">▱</span><span class="stat-label">Số dư khả dụng</span>
+                <strong class="stat-value" id="dashboard-balance">Đang tải...</strong>
+                <span class="stat-label">Dữ liệu theo tài khoản hiện tại</span>
+            </article>
+            <article class="stat-card">
+                <span class="stat-icon green">▤</span><span class="stat-label">Giao dịch thành công</span>
+                <strong class="stat-value" id="dashboard-count">—</strong>
+                <a class="stat-label" href="history.html">Xem chi tiết trong lịch sử</a>
+            </article>
+            <article class="stat-card">
+                <span class="stat-icon purple">●</span><span class="stat-label">Bảo vệ tài khoản</span>
+                <strong class="stat-value" style="font-size:15px">Thông tin tài khoản</strong>
+                <a class="stat-label" href="profile.html">Xem thông tin đã xác thực</a>
+            </article>
+        </section>
+
+        <div class="dashboard-grid">
+            <section class="panel">
+                <h2>Thanh toán học phí nhanh</h2>
+                <p class="panel-description">Chỉ có thể thanh toán khoản học phí gắn với tài khoản sinh viên đang đăng nhập.</p>
+                <div class="quick-pay-form">
+                    <input class="form-control" id="dashboard-student-id" aria-label="Mã số sinh viên" readonly value="Đang tải mã sinh viên...">
+                    <a class="btn-primary" href="tuition.html">Tra cứu học phí</a>
+                </div>
+            </section>
+            <aside class="panel reminder-panel">
+                <span class="reminder-icon">✧</span>
+                <h2>Một chút nhắc nhở ✨</h2>
+                <p>OTP và biên nhận sẽ được gửi đến email sinh viên gắn với tài khoản đang đăng nhập.</p>
+            </aside>
+        </div>
+        <section class="panel" style="margin-top:16px">
+            <h2>Giao dịch gần đây</h2>
+            <p class="panel-description">Các giao dịch học phí mới nhất của tài khoản.</p>
+            <div class="history-scroll">
+                <table class="history-table">
+                    <thead><tr><th>Mã giao dịch</th><th>Sinh viên</th><th>Thời gian</th><th>Số tiền</th><th>Trạng thái</th></tr></thead>
+                    <tbody id="recent-transactions"><tr><td colspan="5">Đang tải giao dịch...</td></tr></tbody>
+                </table>
+            </div>
+        </section>
+    </div>
+    <script src="common.js"></script>
+    <script>
+        if (requireLogin()) loadDashboard();
+
+        async function loadDashboard() {
+            const error = document.getElementById('dashboard-error');
+            const hour = new Date().getHours();
+            const greeting = hour < 11 ? 'Chào buổi sáng' : hour < 14 ? 'Chào buổi trưa' : hour < 18 ? 'Chào buổi chiều' : 'Chào buổi tối';
+            document.querySelector('.page-heading h1').innerText = `${greeting}, ${sessionStorage.getItem('HoTen') || 'bạn'}!`;
+            try {
+                const [profile, transactions] = await Promise.all([
+                    apiFetch(`${API_BASE}/users/me`),
+                    apiFetch(`${API_BASE}/payments`)
+                ]);
+                document.getElementById('dashboard-balance').innerText = formatVND(profile.available_balance);
+                document.getElementById('dashboard-student-id').value = profile.student_id || 'Chưa liên kết mã sinh viên';
+                const successful = transactions.filter(item => item.TrangThai === 'SUCCESS');
+                document.getElementById('dashboard-count').innerText = `${String(successful.length).padStart(2, '0')} giao dịch`;
+                const recent = transactions.slice(0, 4);
+                const body = document.getElementById('recent-transactions');
+                if (!recent.length) {
+                    body.innerHTML = '<tr><td colspan="5"><div class="empty-state"><span class="stat-icon">▤</span><h3>Chưa có giao dịch nào</h3><p>Bắt đầu đóng học phí để xem lịch sử tại đây.</p><a class="btn-primary" href="tuition.html">Đóng học phí đầu tiên</a></div></td></tr>';
+                    return;
+                }
+                body.innerHTML = recent.map(item => `
+                    <tr onclick="location.href='history.html'">
+                        <td>${escapeHtml(item.MaGiaoDich)}</td>
+                        <td>${escapeHtml(item.TenSinhVien)} · ${escapeHtml(item.MSSV)}</td>
+                        <td>${new Date(item.NgayGiaoDich).toLocaleDateString('vi-VN')}</td>
+                        <td class="history-amount">${formatVND(item.SoTienGiaoDich)}</td>
+                        <td><span class="status-badge status-${escapeHtml(item.TrangThai)}">${escapeHtml(STATUS_LABELS[item.TrangThai] || item.TrangThai)}</span></td>
+                    </tr>
+                `).join('');
+            } catch (err) {
+                showAlert(error, err.message);
+                document.getElementById('dashboard-balance').innerText = 'Không tải được';
+                document.getElementById('recent-transactions').innerHTML = '';
+            }
+        }
+    </script>
+</body>
+</html>
