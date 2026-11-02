@@ -1,154 +1,119 @@
 # Hướng dẫn chạy và demo TDTU iBanking
 
-README này chỉ hướng dẫn cài/chạy và demo ứng dụng từng bước. Phần báo cáo, sơ đồ UML/ERD và giải thích kiến trúc được chuẩn bị riêng.
+## 1. Khởi động ứng dụng
 
-## 1. Chuẩn bị
+1. Mở Docker Desktop và đợi Docker Engine báo đang chạy.
+2. Mở PowerShell, chuyển đến thư mục dự án:
 
-- Cài và mở Docker Desktop, chờ Docker Engine khởi động.
-- Mở PowerShell tại thư mục dự án.
-- Gmail cá nhân đã xác thực là địa chỉ gửi; OTP và biên lai gửi tới email sinh viên đang đăng nhập. Trường `From` có thể hiện tên `iBanking TDTU`, nhưng địa chỉ gửi thực vẫn là Gmail.
-- Không dùng mật khẩu Gmail thông thường. Nếu tài khoản trường không hỗ trợ SMTP/App Password hoặc không cho phép gửi bằng địa chỉ trường, cần dùng SMTP relay/thông tin do trường cấp.
+   ```powershell
+   cd D:\Visual_Studio_Code\SOA\Midterm-Kien-Truc-HDV
+   ```
 
-## 2. Cấu hình email và chạy ứng dụng
+3. Tạo và khởi động toàn bộ ứng dụng:
 
-Nếu chưa có `.env`, tạo từ file mẫu mà không ghi đè cấu hình local hiện có:
+   ```powershell
+   docker compose up -d --build --wait
+   ```
 
-```powershell
-if (!(Test-Path .env)) { Copy-Item .env.example .env }
-```
+   Lần đầu chạy, Docker tải image, build các service và tạo database; có thể mất vài phút.
 
-Mở `.env` và cấu hình Gmail SMTP theo tài khoản cá nhân của ông:
+4. Kiểm tra trạng thái:
 
-```env
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-SMTP_USE_TLS=true
-SMTP_USER=your-account@gmail.com
-SMTP_PASSWORD=your-gmail-app-password
-MAIL_FROM=iBanking TDTU <your-account@gmail.com>
-```
+   ```powershell
+   docker compose ps
+   ```
 
-Tạo App Password cho Gmail sau khi bật xác minh 2 bước; không dùng mật khẩu đăng nhập Gmail thường. `SMTP_USER` phải trùng địa chỉ trong `MAIL_FROM`. Tên hiển thị là `iBanking TDTU`, nhưng người gửi thực là Gmail đó. Người nhận vẫn là email `@student.tdtu.edu.vn` trong hồ sơ tài khoản đang đăng nhập (ví dụ `phuc123` nhận tại `524k0011@student.tdtu.edu.vn`); email ngoài domain sinh viên bị chặn.
+   Đợi các service ở trạng thái `Up`; database `db` cần `healthy`.
 
-Khởi chạy ứng dụng. Luồng chạy chính và stack kiểm thử đều dùng SMTP thật theo cấu hình `.env`:
+5. Mở <http://localhost:18080>. Trang chính sẽ chuyển đến đăng nhập.
 
-```powershell
-docker compose up -d --build --wait
-```
+Nếu Docker không kết nối được Engine, mở Docker Desktop và đợi Engine khởi động. Nếu cổng `18080` đang được sử dụng, đóng ứng dụng khác đang chiếm cổng đó rồi chạy lại.
 
-Chờ lệnh hoàn tất, rồi mở:
+## 2. Tài khoản demo
 
-- Ứng dụng: [http://localhost](http://localhost)
-- Hộp thư thật của email tài khoản sinh viên nhận OTP.
+| Tên đăng nhập | Mật khẩu | MSSV | Email nhận OTP |
+|---|---|---|---|
+| `phuc123` | `123456` | `524K0011` | `524k0011@student.tdtu.edu.vn` |
+| `khiem123` | `123456` | `524K0006` | `524k0006@student.tdtu.edu.vn` |
+| `nhi123` | `123456` | `523V0005` | `523v0005@student.tdtu.edu.vn` |
 
-Tài khoản demo:
+Để demo thanh toán thành công, dùng `phuc123`. Mỗi tài khoản chỉ được thanh toán học phí của MSSV liên kết với email tài khoản đó.
 
-| Tên đăng nhập | Mật khẩu | MSSV |
-|---|---|---|
-| `phuc123` | `123456` | `524K0011` |
-| `khiem123` | `123456` | Theo email tài khoản |
-| `nhi123` | `123456` | Theo email tài khoản |
+## 3. Demo luồng thanh toán thành công
 
-Nếu không mở được trang, kiểm tra trạng thái container:
+1. Đăng nhập `phuc123` / `123456`.
+2. Tại **Tổng quan**, giới thiệu số dư khả dụng, MSSV `524K0011` và các giao dịch gần đây.
+3. Chọn **Đóng học phí**. Trang hiển thị thông tin người nộp, email nhận OTP và khoản học phí của chính MSSV `524K0011`.
+4. Kiểm tra số tiền, mở **Xem điều khoản thanh toán**, tích xác nhận đã kiểm tra thông tin rồi chọn **Kiểm tra thông tin**.
+5. Ở trang **Kiểm tra giao dịch**, đối chiếu người nộp, email, sinh viên, học kỳ và số tiền. Tích đồng ý điều khoản rồi chọn **Gửi mã OTP**.
+6. Mở hộp thư `524k0011@student.tdtu.edu.vn`, tìm thư có tiêu đề **[iBanking TDTU] Mã OTP xác nhận thanh toán học phí**. Nếu chưa thấy, kiểm tra Spam. Không tìm OTP trong Mailpit.
+7. Nhập mã OTP 6 chữ số trên trang **Xác thực OTP**, sau đó chọn **Xác minh & thanh toán**. Mã có hiệu lực trong 5 phút.
+8. Khi thấy thông báo **Thanh toán thành công**, kiểm tra biên lai gồm mã giao dịch, người nộp, sinh viên, số tiền và số dư mới. Hệ thống cũng gửi email xác nhận thanh toán đến hộp thư sinh viên.
+9. Chọn **Xem lịch sử** hoặc **Lịch sử giao dịch** để xác nhận trạng thái giao dịch là **Thành công**.
+
+Với dữ liệu mới khởi tạo, học phí mẫu của `524K0011` là `750.000 VNĐ`. Sau giao dịch thành công, số dư giảm tương ứng và học phí được đánh dấu đã đóng.
+
+## 4. Demo các trường hợp kiểm tra khác
+
+### Không được thanh toán thay sinh viên khác
+
+1. Đăng nhập `khiem123` / `123456`.
+2. Thử tra cứu hoặc tạo giao dịch cho MSSV `524K0011` của tài khoản `phuc123`.
+3. Ứng dụng chỉ lấy MSSV từ tài khoản đang đăng nhập; không cho sửa MSSV để thanh toán thay người khác.
+
+### Không đủ số dư
+
+1. Đăng nhập `nhi123` / `123456`.
+2. Tra cứu học phí của MSSV `523V0005`.
+3. Số dư khả dụng mẫu thấp hơn khoản học phí, nên nút tiếp tục thanh toán không khả dụng.
+
+### OTP sai hoặc hết hạn
+
+- Nhập sai OTP: giao dịch còn cho thử lại nếu chưa đạt giới hạn.
+- Nhập sai đủ 3 lần: giao dịch chuyển `FAILED`, không trừ số dư và không đóng học phí.
+- Không xác nhận trong 5 phút: OTP hết hạn và giao dịch bị hủy.
+
+## 5. Xem thông tin tài khoản và lịch sử
+
+- Chọn **Tài khoản** để xem họ tên, MSSV, số điện thoại và email đã liên kết; thông tin này chỉ đọc.
+- Chọn **Lịch sử giao dịch** để tìm theo mã giao dịch/sinh viên hoặc lọc theo trạng thái và thời gian.
+- Chọn một giao dịch trong danh sách để xem chi tiết.
+
+## 6. Xử lý khi app hoặc email có lỗi
+
+Kiểm tra trạng thái container:
 
 ```powershell
 docker compose ps
 ```
 
-Nếu cổng `80` đã được ứng dụng khác sử dụng, đóng ứng dụng đó rồi chạy lại lệnh khởi động.
-
-## 3. Demo luồng thanh toán thành công
-
-1. Truy cập [http://localhost](http://localhost), đăng nhập bằng `phuc123` / `123456`.
-2. Ở trang **Tổng quan**, giới thiệu số dư, MSSV và danh sách giao dịch gần đây.
-3. Chọn **Đóng học phí**. Tài khoản `phuc123` chỉ tra cứu và thanh toán khoản học phí của MSSV `524K0011`; MSSV và email tài khoản không thể sửa.
-4. Kiểm tra khoản học phí, tích điều khoản rồi chọn tiếp tục.
-5. Ở màn hình rà soát, kiểm tra email nhận OTP, sinh viên, học kỳ và số tiền; chọn **Gửi mã OTP**.
-6. Mở hộp thư thật của tài khoản sinh viên, tìm email có tiêu đề `[iBanking TDTU] Mã OTP xác nhận thanh toán học phí`. Kiểm tra thư mục Spam nếu chưa thấy thư đến.
-7. Kiểm tra địa chỉ thư:
-   - **From:** `iBanking TDTU <địa chỉ Gmail đã cấu hình>`
-   - **To:** email trong hồ sơ tài khoản đang đăng nhập (với `phuc123`: `524k0011@student.tdtu.edu.vn`).
-   - Địa chỉ gửi và nhận trùng nhau trong tài khoản demo.
-8. Nhập OTP trong vòng 5 phút và xác nhận thanh toán.
-9. Xem biên lai, sau đó mở **Lịch sử giao dịch** để xác nhận giao dịch có trạng thái `SUCCESS`. Hộp thư thật nhận thêm email biên lai.
-
-OTP có hiệu lực 5 phút. Nhập sai đủ 3 lần hoặc để OTP hết hạn sẽ hủy giao dịch (`FAILED`), không trừ số dư và không gạch nợ học phí; giao diện báo kết quả rồi quay về trang tổng quan.
-
-> Nếu gửi không thành công, kiểm tra log bằng `docker compose logs --tail 100 notification-service payment-service`. Gmail SMTP xác nhận gửi thành công không đảm bảo thư vào Inbox TDTU; chính sách của trường có thể chặn thư từ bên ngoài.
-
-## 4. Kiểm tra dữ liệu sau thanh toán
-
-Chạy các lệnh sau trong PowerShell. Mỗi service nghiệp vụ dùng một database riêng trong PostgreSQL container của project demo:
+Xem log gateway và các service xử lý thanh toán/email:
 
 ```powershell
-docker compose exec -T db psql -U root -d auth_db -c 'SELECT "MaNguoiDung", "TenDangNhap", "SoDuKhaDung" FROM "NguoiDung";'
-docker compose exec -T db psql -U root -d tuition_db -c 'SELECT "MaHocPhi", "MSSV", "TrangThai" FROM "HocPhi";'
-docker compose exec -T db psql -U root -d payment_db -c 'SELECT "MaGiaoDich", "MSSV", "TrangThai", "SoTienGiaoDich" FROM "GiaoDich" ORDER BY "NgayGiaoDich" DESC LIMIT 10;'
+docker compose logs --tail 100 gateway payment-service notification-service
 ```
 
-Sau thanh toán thành công, số dư giảm theo số tiền học phí, khoản học phí chuyển thành `DA_DONG`, và giao dịch được lưu với trạng thái `SUCCESS`.
-
-## 5. Chạy kiểm thử demo (không bắt buộc)
-
-Mở PowerShell tại thư mục dự án. Các test dùng SMTP đã cấu hình trong `.env` và gửi OTP/biên lai thật; kịch bản cần OTP sẽ yêu cầu nhập mã nhận được. Mỗi lệnh dưới đây tự tạo stack test cô lập, chạy kịch bản rồi dọn stack sau khi hoàn tất:
+Nếu vừa thay đổi file cấu hình Compose hoặc cần build lại ứng dụng:
 
 ```powershell
-python test_concurrency.py
+docker compose up -d --build --wait
 ```
 
-Lệnh trên chạy hai kịch bản:
+Nếu email chưa đến, kiểm tra đúng hộp thư của tài khoản đang đăng nhập và thư mục Spam. SMTP báo gửi thành công không đảm bảo email đã vào Inbox; hệ thống email TDTU có thể lọc hoặc chặn thư từ bên ngoài.
 
-- `concurrency1`: hai giao dịch cùng tranh thanh toán một khoản học phí; chỉ một giao dịch được thành công.
-- `concurrency2`: tài khoản khác bị chặn khi thử thanh toán học phí của `phuc123`.
+## 7. Dừng hoặc chạy lại từ dữ liệu ban đầu
 
-Có thể chạy riêng:
-
-```powershell
-python test_concurrency.py concurrency1
-python test_concurrency.py concurrency2
-```
-
-Các kịch bản cần OTP sẽ gửi email thật và yêu cầu nhập OTP đọc từ hộp thư. Đảm bảo `.env` có SMTP credentials hợp lệ trước khi chạy. Khởi chạy project test cô lập trước:
-
-```powershell
-docker compose -p midterm-check -f docker-compose.yml -f docker-compose.test.yml up -d --build --wait
-```
-
-Sau đó, để chạy các kịch bản API, OTP hoặc Gateway trên stack test, thiết lập biến môi trường:
-
-```powershell
-$env:DEMO_GATEWAY_URL = "http://localhost:18080/api/v1"
-$env:TEST_COMPOSE_PROJECT = "midterm-check"
-$env:TEST_COMPOSE_FILES = "docker-compose.yml;docker-compose.test.yml"
-```
-
-Chạy một kịch bản mỗi lần:
-
-```powershell
-python tests\demo_test.py api
-python tests\demo_test.py otp
-python tests\demo_test.py gateway
-```
-
-Các kịch bản này tạo giao dịch và thay đổi dữ liệu demo. Để đưa dữ liệu về trạng thái ban đầu trước khi chạy kịch bản khác, xóa riêng stack demo rồi khởi động lại:
-
-```powershell
-docker compose -p midterm-check -f docker-compose.yml -f docker-compose.test.yml down --remove-orphans --volumes
-docker compose -p midterm-check -f docker-compose.yml -f docker-compose.test.yml up -d --build --wait
-```
-
-Sau khi chạy test, dừng riêng stack test:
-
-```powershell
-docker compose -p midterm-check -f docker-compose.yml -f docker-compose.test.yml down --remove-orphans --volumes
-```
-
-## 6. Dừng ứng dụng demo
-
-Sau khi trình bày xong, dừng và xóa riêng stack demo:
+Dừng ứng dụng nhưng giữ dữ liệu:
 
 ```powershell
 docker compose down
 ```
 
-Thêm `--volumes` nếu muốn xóa cả dữ liệu PostgreSQL demo.
+Muốn xóa dữ liệu database và khởi tạo lại dữ liệu demo ban đầu:
+
+```powershell
+docker compose down --volumes
+docker compose up -d --build --wait
+```
+
+`--volumes` xóa dữ liệu giao dịch và database hiện tại của project `midterm_soa_demo`.
