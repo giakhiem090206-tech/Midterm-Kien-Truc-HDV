@@ -23,6 +23,6 @@ INSERT INTO "SinhVien" ("MSSV", "HoTen") VALUES
 
 -- Dữ liệu dành cho kiểm thử số dư và race condition.
 INSERT INTO "HocPhi" ("MSSV", "HocKy", "SoTienPhaiNop", "TrangThai") VALUES
-('524K0006', 'HK1-2026', 8500000.00, 'DA_DONG'),
-('524K0011', 'HK1-2026', 750000.00, 'CHUA_DONG'),
-('523V0005', 'HK1-2026', 15000000.00, 'CHUA_DONG');
+('524K0006', 'HK1-2026', 50000000.00, 'DA_DONG'),
+('524K0011', 'HK1-2026', 50000000.00, 'CHUA_DONG'),
+('523V0005', 'HK1-2026', 50000000.00, 'CHUA_DONG');

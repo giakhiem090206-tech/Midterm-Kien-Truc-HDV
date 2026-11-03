@@ -171,7 +171,7 @@ SQL
 echo DELETE FROM "XacThucOTP"; | docker compose exec -T db psql -U root -d payment_db
 echo DELETE FROM "GiaoDich"; | docker compose exec -T db psql -U root -d payment_db
 echo DELETE FROM "BalanceOperation"; | docker compose exec -T db psql -U root -d auth_db
-echo UPDATE "NguoiDung" SET "SoDuKhaDung" = CASE "TenDangNhap" WHEN 'khiem123' THEN 5000000.00 WHEN 'phuc123' THEN 15500000.00 WHEN 'nhi123' THEN 1000000.00 END WHERE "TenDangNhap" IN ('khiem123', 'phuc123', 'nhi123'); | docker compose exec -T db psql -U root -d auth_db
+echo UPDATE "NguoiDung" SET "SoDuKhaDung" = CASE "TenDangNhap" WHEN 'khiem123' THEN 60000000.00 WHEN 'phuc123' THEN 70000000.00 WHEN 'nhi123' THEN 800000000.00 END WHERE "TenDangNhap" IN ('khiem123', 'phuc123', 'nhi123'); | docker compose exec -T db psql -U root -d auth_db
 echo UPDATE "HocPhi" SET "TrangThai" = 'CHUA_DONG', "MaGiaoDichThanhToan" = NULL; | docker compose exec -T db psql -U root -d tuition_db
 ```
 
