@@ -390,17 +390,6 @@ def create_payment(
     user_data = user_res.json()
     tuition_data = tuition_res.json()
 
-    if not user_data.get("student_id"):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Tài khoản chưa được liên kết với mã sinh viên TDTU"
-        )
-    if tuition_data["MSSV"].strip().upper() != user_data["student_id"].strip().upper():
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Bạn chỉ có thể thanh toán học phí của chính mình"
-        )
-
     if idempotency_key:
         existing = _find_by_idempotency_key(db, user_id, idempotency_key)
         if existing:

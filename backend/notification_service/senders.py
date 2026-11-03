@@ -45,9 +45,9 @@ class SmtpEmailSender(NotificationSender):
                 if self.user:
                     smtp.login(self.user, self.password)
                 smtp.send_message(msg)
-                print(f"[SUCCESS] Đã gửi OTP tới {recipient}")
-        except Exception as e:
-            print(f"[ERROR] Lỗi gửi email: {str(e)}")
+                print(f"[SUCCESS] Đã gửi email tới {recipient}")
+        except (smtplib.SMTPException, OSError) as e:
+            raise RuntimeError(f"SMTP không gửi được email tới {recipient}") from e
 
 class ConsoleSender(NotificationSender):
     def send(self, to: str, subject: str, html: str) -> None:

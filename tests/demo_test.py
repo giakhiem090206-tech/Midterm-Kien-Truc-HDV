@@ -3,8 +3,9 @@ Script demo / kiểm thử hệ thống qua REST API (chỉ dùng thư viện ch
 
 Cách chạy (sau khi `docker compose up -d`):
     python tests/demo_test.py api            # luồng chính + các mã lỗi HTTP
-    python tests/demo_test.py concurrency1   # nhiều giao dịch đồng thời trên cùng 1 tài khoản
-    python tests/demo_test.py concurrency2   # chặn tài khoản thanh toán học phí của sinh viên khác
+    python tests/demo_test.py concurrency1   # tự đóng học phí; kiểm tra gửi OTP
+    python tests/demo_test.py concurrency2   # trả học phí cho sinh viên khác; kiểm tra gửi OTP
+    python tests/demo_test.py self_payment_all  # tự đóng học phí và gửi OTP cho từng tài khoản demo
     python tests/demo_test.py gateway        # Swagger qua Gateway + Gateway chỉ mở API công khai
     python tests/demo_test.py otp            # OTP: nhập sai đủ 3 lần, OTP hết hạn sau 5 phút
 
@@ -18,6 +19,7 @@ import subprocess
 import sys
 import threading
 import time
+from datetime import datetime, timezone
 import urllib.error
 import urllib.request
 
@@ -84,9 +86,9 @@ def confirm(token, txn, otp):
 
 
 def otp_from_email(txn):
-    """Nhận OTP người dùng đọc từ email thật."""
+    """Nhận OTP người nộp đọc từ email tài khoản của họ."""
     otp = input(
-        f"  Mở hộp thư sinh viên, lấy OTP của giao dịch {txn} (hiệu lực 5 phút): "
+        f"  Mở email tài khoản người nộp, lấy OTP giao dịch {txn} (hiệu lực 5 phút): "
     ).strip()
     if not re.fullmatch(r"\d{6}", otp):
         raise ValueError("OTP phải gồm đúng 6 chữ số.")
@@ -153,22 +155,20 @@ def scenario_api():
 
     s, d = create_payment(nhi, tuition_id(nhi, "523V0005"))
     check("nhi123 (1tr) thanh toán 15tr", s, 400, d)
-    s, d = create_payment(phuc, tuition_id(phuc, "523V0005"))
-    check("Chặn phuc123 thanh toán học phí của sinh viên khác", s, 403, d)
     s, d = create_payment(phuc, -1)
     check("Tạo giao dịch với MaHocPhi không hợp lệ", s, 400, d)
 
     key = f"demo-{time.time_ns()}"
-    s, d = create_payment(phuc, tuition_id(phuc, "524K0011"), key)
-    check("phuc123 tạo giao dịch thanh toán 524K0011 (kèm Idempotency-Key)", s, 201, d)
+    s, d = create_payment(phuc, tuition_id(phuc, "523V0005"), key)
+    check("phuc123 thanh toán học phí sinh viên khác 523V0005", s, 201, d)
     txn = d["transaction_id"]
     otp = otp_from_email(txn)
 
-    s, d = create_payment(phuc, tuition_id(phuc, "524K0011"), key)
+    s, d = create_payment(phuc, tuition_id(phuc, "523V0005"), key)
     check_true("Gửi lại cùng Idempotency-Key -> trả lại đúng giao dịch cũ",
                s == 201 and d.get("transaction_id") == txn)
-    s, d = create_payment(phuc, tuition_id(phuc, "523V0005"), key)
-    check("Idempotency-Key không thể dùng để thanh toán học phí của sinh viên khác", s, 403, d)
+    s, d = create_payment(phuc, tuition_id(phuc, "524K0011"), key)
+    check("Idempotency-Key không thể dùng lại cho khoản học phí khác", s, 409, d)
 
     wrong = "000000" if otp != "000000" else "111111"
     s, d = confirm(phuc, txn, wrong)
@@ -188,46 +188,134 @@ def scenario_api():
         print(f"     {g['MaGiaoDich'][:16]}… {g['MSSV']} {g['SoTienGiaoDich']:>12,.0f} {g['TrangThai']}")
 
     receipt_received = input(
-        "  Xác nhận email biên lai đã đến hộp thư sinh viên? (y/n): "
+        "  Xác nhận email biên lai đã đến email tài khoản người nộp? (y/n): "
     ).strip().lower() == "y"
     check_true("Email biên lai đã đến hộp thư thật", receipt_received)
 
 
 def scenario_concurrency1():
-    print("=== Concurrency #1: hai giao dịch cùng tài khoản cùng thanh toán học phí của chính mình ===")
-    phuc = login("phuc123")
-    own_tuition = tuition_id(phuc, "524K0011")
-    t1 = create_payment(phuc, own_tuition)[1]["transaction_id"]
-    t2 = create_payment(phuc, own_tuition)[1]["transaction_id"]
-    o1, o2 = otp_from_email(t1), otp_from_email(t2)
-    before = balance(phuc)
+    scenario_self_payment()
 
-    results = run_concurrently(lambda: confirm(phuc, t1, o1), lambda: confirm(phuc, t2, o2))
-    for (s, d), label in zip(results, [t1, t2]):
-        print(f"  {label}: HTTP {s} {d.get('detail') or d.get('message')}")
 
-    after = balance(phuc)
-    successes = sum(1 for s, _ in results if s == 200)
-    print(f"  Số dư: {before:,.0f} -> {after:,.0f}")
-    expected_balance = before - 750_000
-    check_true("Chỉ 1 giao dịch thành công; khoản còn lại được hoàn tiền idempotent",
-               successes == 1 and after == expected_balance and after >= 0)
+def scenario_self_payment():
+    scenario_self_payment_all()
+
+
+def scenario_self_payment_all():
+    print("=== Tự đóng học phí: chỉ gửi OTP cho khoản đang CHUA_DONG ===")
+    payer_accounts = ("phuc123", "khiem123", "tin123", "nhu123", "nhi123")
+    sent = 0
+    skipped = 0
+
+    for username in payer_accounts:
+        login_status, login_data = call(
+            "POST", f"{AUTH}/auth/login", {"username": username, "password": "123456"}
+        )
+        check(f"Đăng nhập tài khoản {username}", login_status, 200, login_data)
+        if login_status != 200:
+            continue
+        token = login_data["access_token"]
+
+        profile_status, profile = call("GET", f"{AUTH}/users/me", token=token)
+        check(f"Lấy thông tin tài khoản {username}", profile_status, 200, profile)
+        if profile_status != 200 or not profile.get("student_id"):
+            check_true(f"{username} có MSSV liên kết", False)
+            continue
+
+        tuition_status, tuition = call(
+            "GET", f"{TUITION}/tuitions/{profile['student_id']}", token=token
+        )
+        if tuition_status == 404:
+            skipped += 1
+            print(
+                f"  Bỏ qua {username} ({profile['student_id']}): "
+                "không có khoản học phí CHUA_DONG."
+            )
+            continue
+        check(f"{username} tra cứu học phí MSSV của mình {profile['student_id']}", tuition_status, 200, tuition)
+        if tuition_status != 200:
+            continue
+
+        history_status, history = call("GET", f"{PAYMENT}/payments", token=token)
+        check(f"Kiểm tra giao dịch đang chờ OTP của {username}", history_status, 200, history)
+        if history_status != 200:
+            continue
+
+        now = datetime.now(timezone.utc)
+        pending = next(
+            (
+                item for item in history
+                if item["MaHocPhi"] == tuition["MaHocPhi"]
+                and item["TrangThai"] == "PENDING"
+                and item.get("otp_expires_at")
+                and datetime.fromisoformat(item["otp_expires_at"].replace("Z", "+00:00")) > now
+            ),
+            None,
+        )
+        if pending:
+            skipped += 1
+            print(
+                f"  Bỏ qua {username}: giao dịch {pending['MaGiaoDich']} "
+                "đã có OTP còn hạn, không gửi trùng."
+            )
+            continue
+
+        before = balance(token)
+        status, data = create_payment(token, tuition["MaHocPhi"])
+        check(f"Tạo giao dịch; OTP gửi tới {profile['email']}", status, 201, data)
+        if status == 201:
+            sent += 1
+            print(f"  Notification Service chấp nhận gửi OTP; giao dịch {data['transaction_id']}.")
+        check_true(f"Số dư {username} chưa trừ trước khi nhập OTP", balance(token) == before)
+
+    print(f"Hoàn tất: gửi OTP cho {sent}; bỏ qua {skipped} khoản đã đóng hoặc đã có OTP còn hạn.")
 
 
 def scenario_concurrency2():
-    print("=== Quyền sở hữu học phí: tài khoản khác không thể khởi tạo giao dịch ===")
+    print("=== Trả học phí cho sinh viên khác: kiểm tra gửi OTP ===")
     khiem, phuc = login("khiem123"), login("phuc123")
     phuc_tuition = tuition_id(phuc, "524K0011")
+    _, payer_profile = call("GET", f"{AUTH}/users/me", token=khiem)
     before = balance(khiem)
     status, data = create_payment(khiem, phuc_tuition)
-    check("khiem123 không thể tạo giao dịch cho MSSV 524K0011 của phuc123", status, 403, data)
-    check_true("Không tạo giao dịch chờ OTP khi bị từ chối",
-               not call("GET", f"{PAYMENT}/payments", token=khiem)[1])
-    check_true("Số dư người bị từ chối không đổi", balance(khiem) == before)
+    check("khiem123 tạo giao dịch cho MSSV 524K0011 của phuc123", status, 201, data)
+    if status != 201:
+        return
 
-    own_tuition = tuition_id(phuc, "524K0011")
-    status, data = create_payment(phuc, own_tuition)
-    check("Sinh viên tạo giao dịch cho học phí của chính mình", status, 201, data)
+    history = call("GET", f"{PAYMENT}/payments", token=khiem)[1]
+    check_true("Giao dịch đứng tên người nộp khiem123 nhưng lưu đúng MSSV sinh viên",
+               any(item["MaGiaoDich"] == data.get("transaction_id") and item["MSSV"] == "524K0011"
+                   for item in history))
+    check_true("Số dư chưa trừ trước khi xác thực OTP", balance(khiem) == before)
+
+    print(f"  Notification Service chấp nhận gửi OTP tới email người trả: {payer_profile['email']}.")
+    print("  Dừng tại bước gửi OTP; chưa xác nhận thanh toán nên không gửi biên lai.")
+
+
+def scenario_otp_all():
+    print("=== Gửi OTP thật tới email của từng tài khoản demo ===")
+    payer_accounts = ("phuc123", "khiem123", "tin123", "nhu123", "nhi123")
+    lookup_token = login("phuc123")
+    tuition = call("GET", f"{TUITION}/tuitions/524K0011", token=lookup_token)
+    if tuition[0] != 200:
+        check("Tra cứu khoản học phí mẫu để gửi OTP", tuition[0], 200, tuition[1])
+        return
+
+    sent = 0
+    for username in payer_accounts:
+        token = login(username)
+        profile_status, profile = call("GET", f"{AUTH}/users/me", token=token)
+        if profile_status != 200:
+            check(f"Lấy email tài khoản {username}", profile_status, 200, profile)
+            continue
+
+        status, data = create_payment(token, tuition[1]["MaHocPhi"])
+        check(f"Gửi OTP tới {profile['email']} (tài khoản {username})", status, 201, data)
+        if status == 201:
+            sent += 1
+            print(f"     Giao dịch: {data['transaction_id']}")
+
+    check_true(f"Đã gửi SMTP tới {sent}/{len(payer_accounts)} tài khoản demo", sent == len(payer_accounts))
 
 
 GATEWAY_ROOT = GATEWAY.rsplit("/api/v1", 1)[0]          # http://localhost
@@ -264,7 +352,7 @@ def transaction_status(token, transaction_id):
 
 
 def scenario_otp():
-    print("=== OTP: tối đa 3 lần nhập sai, hết hạn sau 5 phút (phuc123 thanh toán học phí của mình) ===")
+    print("=== OTP: tối đa 3 lần nhập sai, hết hạn sau 5 phút ===")
     phuc = login("phuc123")
     hp = tuition_id(phuc, "524K0011")
     before = balance(phuc)
@@ -341,7 +429,8 @@ def scenario_gateway():
 
 if __name__ == "__main__":
     scenarios = {"api": scenario_api, "concurrency1": scenario_concurrency1, "concurrency2": scenario_concurrency2,
-                 "gateway": scenario_gateway, "otp": scenario_otp}
+                 "gateway": scenario_gateway, "otp": scenario_otp, "otp_all": scenario_otp_all,
+                 "self_payment": scenario_self_payment, "self_payment_all": scenario_self_payment_all}
     name = sys.argv[1] if len(sys.argv) > 1 else "api"
     if name not in scenarios:
         sys.exit(f"Kịch bản hợp lệ: {', '.join(scenarios)}")

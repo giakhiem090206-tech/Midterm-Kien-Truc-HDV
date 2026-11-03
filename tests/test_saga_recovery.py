@@ -65,7 +65,7 @@ class SagaRecoveryTests(unittest.TestCase):
         }, token=token)
         transaction_id = created["transaction_id"]
         otp = input(
-            f"Open the real student inbox and enter the OTP for {transaction_id} (valid for 5 minutes): "
+            f"Open the account email inbox and enter the OTP for {transaction_id} (valid for 5 minutes): "
         ).strip()
         self.assertRegex(otp, r"^\d{6}$", "OTP must contain exactly six digits")
 

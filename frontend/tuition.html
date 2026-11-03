@@ -33,12 +33,12 @@
             <div class="section">
                 <div class="section-title"><span class="step-number">02</span> Thông tin học phí</div>
                 <div class="form-group">
-                    <label for="mssv">Mã số sinh viên của bạn</label>
+                    <label for="mssv">Mã số sinh viên cần đóng học phí</label>
                     <div class="quick-pay-form">
-                        <input type="text" id="mssv" class="form-control" readonly aria-describedby="mssv-hint">
+                        <input type="text" id="mssv" class="form-control" maxlength="20" autocomplete="off" placeholder="Nhập MSSV cần thanh toán" aria-describedby="mssv-hint">
                         <button type="button" id="lookupBtn" class="btn-primary">Tra cứu</button>
                     </div>
-                    <div id="mssv-hint" class="hint"></div>
+                    <div id="mssv-hint" class="hint">Email OTP luôn là email của tài khoản đang đăng nhập.</div>
                 </div>
                 <input type="hidden" id="studentName">
                 <input type="hidden" id="hocKy">
@@ -101,6 +101,13 @@
             agreeTerms.addEventListener('change', updateState);
             confirmBtn.addEventListener('click', continueToReview);
             lookupBtn.addEventListener('click', lookupTuition);
+            mssvInput.addEventListener('keydown', event => {
+                if (event.key === 'Enter') {
+                    event.preventDefault();
+                    lookupTuition();
+                }
+            });
+            mssvInput.addEventListener('input', clearTuition);
 
             await loadProfile();
         }
@@ -112,24 +119,38 @@
                 document.getElementById('payerPhone').value = profile.phone;
                 document.getElementById('payerEmail').value = profile.email;
                 document.getElementById('balance').innerText = formatVND(profile.available_balance);
-                if (!profile.student_id) {
-                    showAlert(pageMsg, 'Email tài khoản chưa được liên kết với mã sinh viên TDTU.');
-                    updateState();
-                    return;
+                if (profile.student_id) {
+                    mssvInput.value = profile.student_id;
+                    lookupTuition();
                 }
-                mssvInput.value = profile.student_id;
-                lookupTuition();
             } catch (err) {
                 showAlert(pageMsg, err.message);
             }
             updateState();
         }
 
+        function clearTuition() {
+            lookupSeq++;
+            tuition = null;
+            document.getElementById('student-found').classList.remove('visible');
+            mssvHint.className = 'hint';
+            mssvHint.innerText = 'Email OTP luôn là email của tài khoản đang đăng nhập.';
+            updateState();
+        }
+
         async function lookupTuition() {
-            const mssv = profile?.student_id;
-            if (!mssv) return;
+            const mssv = mssvInput.value.trim().toUpperCase();
+            if (!mssv) {
+                clearTuition();
+                mssvHint.className = 'hint error';
+                mssvHint.innerText = 'Vui lòng nhập MSSV cần tra cứu.';
+                return;
+            }
 
             const seq = ++lookupSeq;
+            tuition = null;
+            document.getElementById('student-found').classList.remove('visible');
+            updateState();
             mssvHint.className = 'hint info';
             mssvHint.innerText = 'Đang tra cứu...';
 
@@ -172,7 +193,7 @@
 
         function continueToReview() {
             if (!tuition) return;
-            const mssv = profile.student_id;
+            const mssv = tuition.MSSV;
             if (sessionStorage.getItem('paymentIdempotencyMssv') !== mssv) {
                 sessionStorage.removeItem('paymentIdempotencyKey');
             }

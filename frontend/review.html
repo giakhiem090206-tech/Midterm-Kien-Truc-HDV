@@ -45,16 +45,13 @@
         async function initReview() {
             try {
                 profile = await apiFetch(`${API_BASE}/users/me`);
-                if (!profile.student_id) {
-                    throw new Error('Email tài khoản chưa được liên kết với mã sinh viên TDTU.');
+                const mssv = sessionStorage.getItem('paymentIdempotencyMssv');
+                if (!mssv) {
+                    throw new Error('Vui lòng quay lại trang đóng học phí và tra cứu MSSV cần thanh toán.');
                 }
-                tuition = await apiFetch(`${API_BASE}/tuitions/${encodeURIComponent(profile.student_id)}`);
-                if (sessionStorage.getItem('paymentIdempotencyMssv') !== profile.student_id) {
-                    sessionStorage.removeItem('paymentIdempotencyKey');
-                    sessionStorage.setItem('paymentIdempotencyMssv', profile.student_id);
-                }
-                if (tuition.MSSV.toUpperCase() !== profile.student_id.toUpperCase()) {
-                    throw new Error('Bạn chỉ có thể thanh toán học phí của chính mình.');
+                tuition = await apiFetch(`${API_BASE}/tuitions/${encodeURIComponent(mssv)}`);
+                if (tuition.MSSV.toUpperCase() !== mssv.toUpperCase()) {
+                    throw new Error('MSSV tra cứu không khớp với khoản học phí.');
                 }
                 document.getElementById('review-payer').innerText = profile.full_name;
                 document.getElementById('review-email').innerText = profile.email;

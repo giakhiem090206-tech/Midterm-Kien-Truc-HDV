@@ -21,6 +21,6 @@ CREATE TABLE IF NOT EXISTS "BalanceOperation" (
 );
 
 INSERT INTO "NguoiDung" ("TenDangNhap", "MatKhau", "HoTen", "SoDienThoai", "Email", "SoDuKhaDung") VALUES
-('khiem123', '123456', 'Thân Vũ Gia Khiêm', '0901000006', '524k0006@student.tdtu.edu.vn', 5000000.00),
-('phuc123',  '123456', 'Nguyễn Gia Phúc',   '0901000001', '524k0011@student.tdtu.edu.vn', 15500000.00),
-('nhi123',   '123456', 'Hồng Bảo Nhi',      '0901000005', '523v0005@student.tdtu.edu.vn', 1000000.00);
+('khiem123', '123456', 'Thân Vũ Gia Khiêm', '0903000001', '524k0006@student.tdtu.edu.vn', 5000000.00),
+('phuc123',  '123456', 'Nguyễn Gia Phúc',   '0903000002', '524k0011@student.tdtu.edu.vn', 15500000.00),
+('nhi123',   '123456', 'Hồng Bảo Nhi',      '0903000005', '523v0005@student.tdtu.edu.vn', 1000000.00);

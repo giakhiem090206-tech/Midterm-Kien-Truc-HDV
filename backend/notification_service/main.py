@@ -39,6 +39,20 @@ def _render_otp(data: dict) -> tuple:
         """
     )
 
+def _render_otp_test(data: dict) -> tuple:
+    return (
+        "[iBanking TDTU] Kiểm thử gửi OTP qua SMTP",
+        f"""
+        <h2>Email kiểm thử SMTP</h2>
+        <p>Xin chào <b>{escape(data['full_name'])}</b>,</p>
+        <p>Đây là email kiểm thử khả năng gửi OTP của hệ thống iBanking TDTU.
+           Không có giao dịch thanh toán nào được tạo.</p>
+        <p>Mã kiểm thử: <b style="font-size: 24px; letter-spacing: 6px;">{escape(data['otp'])}</b></p>
+        <p>Mã này chỉ để kiểm tra email nhận được, không dùng để xác nhận thanh toán.</p>
+        <p style="color: #888;">Mã kiểm thử: {escape(data['transaction_id'])}</p>
+        """
+    )
+
 def _render_payment_success(data: dict) -> tuple:
     return (
         "[iBanking TDTU] Thanh toán học phí thành công",
@@ -58,6 +72,7 @@ def _render_payment_success(data: dict) -> tuple:
 
 TEMPLATES = {
     "OTP": _render_otp,
+    "OTP_TEST": _render_otp_test,
     "PAYMENT_SUCCESS": _render_payment_success,
 }
 
@@ -65,7 +80,7 @@ TEMPLATES = {
 class NotificationRequest(BaseModel):
     channel: str = "email"
     to: str = Field(min_length=3, max_length=100)
-    template: Literal["OTP", "PAYMENT_SUCCESS"]
+    template: Literal["OTP", "OTP_TEST", "PAYMENT_SUCCESS"]
     data: dict
 
 class NotificationResponse(BaseModel):
