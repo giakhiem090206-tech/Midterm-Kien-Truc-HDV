@@ -133,7 +133,53 @@ Script đọc toàn bộ tài khoản trong `auth_db`, bỏ qua email không thu
 
 ## 7. Reset thủ công để demo lại hoặc chạy lại từ dữ liệu ban đầu
 
-Sau khi demo thanh toán thành công, có thể reset số dư và trạng thái học phí bằng SQL, không cần xóa volume hay khởi động lại app. Ví dụ reset tài khoản `phuc123` để thanh toán lại:
+Có thể reset dữ liệu bằng SQL khi Docker Compose đang chạy, không cần xóa volume hay khởi động lại app.
+
+### Reset toàn bộ demo và xóa lịch sử giao dịch
+
+Các lệnh sau xóa lịch sử giao dịch và OTP, xóa log thao tác số dư, đưa số dư ba tài khoản demo về ban đầu, đồng thời chuyển tất cả khoản học phí về chưa đóng. Chỉ chạy trong môi trường demo local; thao tác xóa lịch sử không thể hoàn tác.
+
+**macOS / Linux** — mở Terminal tại thư mục dự án và chạy từng khối:
+
+```sh
+docker compose exec -T db psql -U root -d payment_db <<'SQL'
+DELETE FROM "XacThucOTP";
+DELETE FROM "GiaoDich";
+SQL
+
+docker compose exec -T db psql -U root -d auth_db <<'SQL'
+DELETE FROM "BalanceOperation";
+UPDATE "NguoiDung"
+SET "SoDuKhaDung" = CASE "TenDangNhap"
+    WHEN 'khiem123' THEN 5000000.00
+    WHEN 'phuc123' THEN 15500000.00
+    WHEN 'nhi123' THEN 1000000.00
+END
+WHERE "TenDangNhap" IN ('khiem123', 'phuc123', 'nhi123');
+SQL
+
+docker compose exec -T db psql -U root -d tuition_db <<'SQL'
+UPDATE "HocPhi"
+SET "TrangThai" = 'CHUA_DONG',
+    "MaGiaoDichThanhToan" = NULL;
+SQL
+```
+
+**Windows Command Prompt (CMD)** — mở CMD tại thư mục dự án và chạy từng dòng:
+
+```cmd
+echo DELETE FROM "XacThucOTP"; | docker compose exec -T db psql -U root -d payment_db
+echo DELETE FROM "GiaoDich"; | docker compose exec -T db psql -U root -d payment_db
+echo DELETE FROM "BalanceOperation"; | docker compose exec -T db psql -U root -d auth_db
+echo UPDATE "NguoiDung" SET "SoDuKhaDung" = CASE "TenDangNhap" WHEN 'khiem123' THEN 5000000.00 WHEN 'phuc123' THEN 15500000.00 WHEN 'nhi123' THEN 1000000.00 END WHERE "TenDangNhap" IN ('khiem123', 'phuc123', 'nhi123'); | docker compose exec -T db psql -U root -d auth_db
+echo UPDATE "HocPhi" SET "TrangThai" = 'CHUA_DONG', "MaGiaoDichThanhToan" = NULL; | docker compose exec -T db psql -U root -d tuition_db
+```
+
+Mỗi lệnh thành công sẽ báo số dòng bị ảnh hưởng. Lịch sử trang **Giao dịch** sẽ trống sau khi reset.
+
+### Reset số dư và học phí nhưng giữ lịch sử (PowerShell)
+
+Nếu chỉ muốn thanh toán lại một khoản, không xóa lịch sử, có thể reset tài khoản `phuc123` và học phí của `524K0011` như sau. Thay thông tin tương ứng nếu demo dữ liệu khác:
 
 ```powershell
 @'
@@ -151,7 +197,7 @@ WHERE "MSSV" = '524K0011'
 '@ | docker compose exec -T db psql -U root -d tuition_db
 ```
 
-Thay số dư và MSSV tương ứng nếu demo tài khoản khác. Cách này giữ nguyên lịch sử giao dịch. Chỉ chạy trong môi trường demo local.
+Cách này giữ nguyên lịch sử giao dịch. Chỉ chạy trong môi trường demo local.
 
 Dừng ứng dụng nhưng giữ dữ liệu:
 

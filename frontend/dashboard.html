@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Tổng quan · TDTU iBanking</title>
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="style.css?v=quick-pay-badge">
 </head>
 <body data-app-page="dashboard">
     <div class="page-container">
@@ -32,7 +32,7 @@
                 <h2>Thanh toán học phí nhanh</h2>
                 <p class="panel-description">Chỉ có thể thanh toán khoản học phí gắn với tài khoản sinh viên đang đăng nhập.</p>
                 <div class="quick-pay-form">
-                    <input class="form-control" id="dashboard-student-id" aria-label="Mã số sinh viên" readonly value="Đang tải mã sinh viên...">
+                    <span class="quick-pay-student-id" id="dashboard-student-id" aria-label="Mã số sinh viên" aria-live="polite">Đang tải mã sinh viên...</span>
                     <a class="btn-primary" href="tuition.html">Tra cứu học phí</a>
                 </div>
             </section>
@@ -68,7 +68,7 @@
                     apiFetch(`${API_BASE}/payments`)
                 ]);
                 document.getElementById('dashboard-balance').innerText = formatVND(profile.available_balance);
-                document.getElementById('dashboard-student-id').value = profile.student_id || 'Chưa liên kết mã sinh viên';
+                document.getElementById('dashboard-student-id').textContent = profile.student_id || 'Chưa liên kết mã sinh viên';
                 const successful = transactions.filter(item => item.TrangThai === 'SUCCESS');
                 document.getElementById('dashboard-count').innerText = `${String(successful.length).padStart(2, '0')} giao dịch`;
                 const recent = transactions.slice(0, 4);

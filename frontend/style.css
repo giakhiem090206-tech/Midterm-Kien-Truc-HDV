@@ -198,6 +198,7 @@ a { color: inherit; }
 .quick-pay-form { display: flex; gap: 9px; }
 .quick-pay-form .form-control { flex: 1; }
 .quick-pay-form .btn-primary { min-width: 130px; }
+.quick-pay-form .quick-pay-student-id { display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; min-width: 112px; min-height: 43px; padding: 10px 18px; border: 1px solid var(--border-color); border-radius: 12px; background: white; color: var(--primary-blue); font-size: 13px; font-weight: 800; letter-spacing: .3px; text-align: center; white-space: nowrap; cursor: default; user-select: text; }
 .reminder-panel { background: linear-gradient(145deg, rgba(255,255,255,.95), rgba(240,250,247,.95)); }
 .reminder-icon { display: grid; width: 34px; height: 34px; place-items: center; margin-bottom: 13px; border-radius: 50%; background: #e1f5ee; color: #168765; font-size: 16px; }
 .reminder-panel p { margin: 9px 0 0; color: var(--text-muted); font-size: 11px; line-height: 1.6; }
@@ -309,6 +310,7 @@ a { color: inherit; }
     .stat-label { display: inline-block; vertical-align: middle; }
     .stat-value { margin: 7px 0 0 43px; font-size: 17px; }
     .quick-pay-form { flex-direction: column; }
+    .quick-pay-form .quick-pay-student-id { flex: auto; width: 100%; }
     .quick-pay-form .btn-primary { width: 100%; }
     .banking-card { padding: 20px 15px; }
     .section, .panel, .history-panel { padding: 16px; border-radius: 14px; }
