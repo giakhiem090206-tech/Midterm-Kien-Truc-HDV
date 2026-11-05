@@ -14,6 +14,34 @@ function getToken() {
     return sessionStorage.getItem('token');
 }
 
+// Chỉ gán avatar cho các tài khoản demo đã biết; tài khoản khác dùng icon chung.
+function userAvatarSrc(identity) {
+    const profile = identity && typeof identity === 'object' ? identity : {};
+    const studentId = String(profile.student_id || profile.MSSV || (profile.email || '').split('@')[0]).trim().toUpperCase();
+    const avatarsByStudentId = {
+        '523V0005': 'assets/user-female.svg',
+        '524K0006': 'assets/user-male.svg',
+        '524K0011': 'assets/user-male.svg',
+    };
+    if (Object.prototype.hasOwnProperty.call(avatarsByStudentId, studentId)) return avatarsByStudentId[studentId];
+    const fullName = typeof identity === 'string' ? identity : profile.full_name || profile.HoTen;
+    const name = String(fullName || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+        .trim().toLowerCase().replace(/\s+/g, ' ');
+    const avatars = {
+        'hong bao nhi': 'assets/user-female.svg',
+        'than vu gia khiem': 'assets/user-male.svg',
+        'nguyen gia phuc': 'assets/user-male.svg',
+    };
+    return Object.prototype.hasOwnProperty.call(avatars, name) ? avatars[name] : 'assets/user.svg';
+}
+
+function syncAccountAvatars(fullName = sessionStorage.getItem('HoTen')) {
+    const src = userAvatarSrc(fullName);
+    document.querySelectorAll('[data-account-avatar]').forEach(img => {
+        img.setAttribute('src', src);
+    });
+}
+
 function logout() {
     sessionStorage.clear();
     window.location.href = 'login.html';
@@ -53,19 +81,26 @@ function mountAppShell() {
     shell.className = 'app-shell';
     shell.innerHTML = `
         <aside class="app-sidebar">
-            <div class="brand"><span class="brand-mark" aria-hidden="true">◈</span><span>TDTU<small>TDTU iBanking</small></span></div>
+            <div class="brand"><span class="brand-mark" aria-hidden="true"><img src="assets/wallet.svg" alt="" width="28" height="28"></span><span>TDTU<small>TDTU iBanking</small></span></div>
             <nav class="app-nav" aria-label="Điều hướng chính">
                 <a class="${activePage === 'dashboard' ? 'active' : ''}" href="dashboard.html"><span class="nav-icon">▣</span><span>Tổng quan</span></a>
                 <a class="${activePage === 'tuition' ? 'active' : ''}" href="tuition.html"><span class="nav-icon">☷</span><span>Đóng học phí</span></a>
                 <a class="${activePage === 'history' ? 'active' : ''}" href="history.html"><span class="nav-icon">◷</span><span>Lịch sử giao dịch</span></a>
-                <a class="${activePage === 'profile' ? 'active' : ''}" href="profile.html"><span class="nav-icon">●</span><span>Tài khoản</span></a>
+                <a class="${activePage === 'profile' ? 'active' : ''}" href="profile.html"><span class="nav-icon nav-icon-user" aria-hidden="true"><img data-account-avatar src="assets/user.svg" alt="" width="18" height="18"></span><span>Tài khoản</span></a>
             </nav>
             <div class="sidebar-bottom"><a href="#" data-logout>Đăng xuất ↗</a></div>
         </aside>
         <main class="app-main">
             <header class="app-header">
                 <div class="page-heading"><div class="eyebrow">TDTU iBanking</div><h1>${title}</h1><p>${subtitle}</p></div>
-                <div class="header-actions"><a class="help-link" href="#" aria-label="Trợ giúp">Trợ giúp</a><div class="user-chip"><span class="avatar" aria-hidden="true">●</span><span data-user-name></span></div></div>
+                <div class="header-actions">
+                    <button type="button" class="theme-toggle" data-theme-toggle aria-pressed="false" aria-label="Chuyển sang chế độ tối" title="Chuyển sang chế độ tối">
+                        <svg class="theme-icon theme-icon-moon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.5 13.2A8.5 8.5 0 0 1 10.8 3.5 8.5 8.5 0 1 0 20.5 13.2Z"/></svg>
+                        <svg class="theme-icon theme-icon-sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5"/></svg>
+                        <span data-theme-label>Chế độ tối</span>
+                    </button>
+                    <div class="user-chip"><span class="avatar" aria-hidden="true"><img data-account-avatar src="assets/user.svg" alt="" width="28" height="28"></span><span data-user-name></span></div>
+                </div>
             </header>
         </main>`;
 
@@ -80,6 +115,8 @@ function mountAppShell() {
     });
     const userName = sessionStorage.getItem('HoTen') || '';
     shell.querySelectorAll('[data-user-name]').forEach(el => { el.innerText = userName; });
+    syncAccountAvatars(userName);
+    window.iBankingTheme?.updateControls();
 }
 
 // Gọi API backend: tự gắn JWT, chuyển lỗi backend thành Error(detail) để hiển thị lên UI

@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none">
+  <defs>
+    <linearGradient id="shirt" x1="16" y1="43" x2="47" y2="61" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#D6F6EC"/>
+      <stop offset="1" stop-color="#94D8C4"/>
+    </linearGradient>
+    <linearGradient id="hair" x1="20" y1="9" x2="44" y2="27" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#9DBBD9"/>
+      <stop offset="1" stop-color="#688BAE"/>
+    </linearGradient>
+  </defs>
+  <path d="M13 56c0-9 7.5-15 19-15s19 6 19 15v3H13v-3Z" fill="url(#shirt)" stroke="#4E8C84" stroke-width="2.2" stroke-linejoin="round"/>
+  <path d="m26 43 6 7 6-7" fill="#F3FFFA"/>
+  <path d="M27 39v5a5 5 0 0 0 10 0v-5" fill="#FFE9DB" stroke="#A27C77" stroke-width="2"/>
+  <path d="M16 25c0-11 6-17 16-17s16 6 16 17v6H16v-6Z" fill="url(#hair)" stroke="#526F91" stroke-width="2.2"/>
+  <circle cx="17" cy="30" r="3.5" fill="#FFE9DB" stroke="#A27C77" stroke-width="1.8"/>
+  <circle cx="47" cy="30" r="3.5" fill="#FFE9DB" stroke="#A27C77" stroke-width="1.8"/>
+  <path d="M18 24c0-8 28-8 28 0v8c0 9-6 14-14 14s-14-5-14-14v-8Z" fill="#FFF0E5" stroke="#A27C77" stroke-width="2"/>
+  <path d="M17.5 25c5 0 10-2.5 13-7 2 5 8 7 16 7-1-10-6-15-15-15-8 0-13 5-14 15Z" fill="url(#hair)"/>
+  <path d="M25.5 29v2m13-2v2" stroke="#465C7B" stroke-width="2.8" stroke-linecap="round"/>
+  <ellipse cx="23" cy="34" rx="3" ry="1.8" fill="#F4B6C7"/>
+  <ellipse cx="41" cy="34" rx="3" ry="1.8" fill="#F4B6C7"/>
+  <path d="M29 35.5a4 4 0 0 0 6 0" stroke="#936875" stroke-width="2" stroke-linecap="round"/>
+  <path d="M22 15c2-2 5-3 8-3" stroke="#D8EBFB" stroke-width="2.2" stroke-linecap="round"/>
+</svg>

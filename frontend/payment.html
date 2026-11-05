@@ -4,7 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Xác thực giao dịch</title>
-    <link rel="stylesheet" href="style.css">
+    <script src="theme.js?v=theme-avatar-2"></script>
+    <link rel="stylesheet" href="style.css?v=theme-avatar-2">
 </head>
 <body data-app-page="payment">
     <div class="page-container top">
@@ -60,7 +61,7 @@
         </div>
     </div>
 
-    <script src="common.js"></script>
+    <script src="common.js?v=theme-avatar-2"></script>
     <script>
         const txnId = new URLSearchParams(window.location.search).get('txn');
         const msgBox = document.getElementById('msg-box');
@@ -235,7 +236,7 @@
             document.getElementById('result-section').style.display = 'block';
             const resultIcon = document.getElementById('result-icon');
             resultIcon.innerText = success ? '✓' : '×';
-            resultIcon.style.background = success ? '#e5f7ef' : '#fff0f2';
+            resultIcon.style.background = success ? 'var(--result-success-bg)' : 'var(--result-error-bg)';
             resultIcon.style.color = success ? 'var(--success-green)' : 'var(--error-red)';
             document.getElementById('result-title').innerText = success ? 'Thanh toán thành công' : 'Giao dịch không thành công';
             document.getElementById('result-title').style.color = success ? 'var(--success-green)' : 'var(--error-red)';

@@ -4,7 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>iBanking - Đăng nhập</title>
-    <link rel="stylesheet" href="style.css">
+    <script src="theme.js?v=theme-avatar-2"></script>
+    <link rel="stylesheet" href="style.css?v=theme-avatar-2">
 </head>
 <body>
     <main class="login-screen">
@@ -15,7 +16,7 @@
             </div>
             <div class="login-form-wrap">
                 <div class="login-form-inner">
-                    <div class="login-brand"><span class="brand-mark" aria-hidden="true">◈</span><span>TDTU</span></div>
+                    <div class="login-brand"><span class="brand-mark" aria-hidden="true"><img src="assets/wallet.svg" alt="" width="28" height="28"></span><span>TDTU</span></div>
                     <h2>Chào mừng trở lại 👋</h2>
                     <p class="login-subtitle">Đăng nhập để tiếp tục thanh toán học phí.</p>
                     <div id="login-error" class="alert alert-error"></div>
@@ -36,7 +37,7 @@
         </section>
     </main>
 
-    <script src="common.js"></script>
+    <script src="common.js?v=theme-avatar-2"></script>
     <script>
         // Đã đăng nhập thì vào thẳng trang thanh toán
         if (getToken()) window.location.href = 'dashboard.html';

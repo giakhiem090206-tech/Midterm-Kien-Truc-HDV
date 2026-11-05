@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none">
+  <defs>
+    <linearGradient id="hair" x1="17" y1="9" x2="48" y2="48" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#C4B7EC"/>
+      <stop offset="1" stop-color="#9582C3"/>
+    </linearGradient>
+    <linearGradient id="shirt" x1="16" y1="43" x2="48" y2="60" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFF0F6"/>
+      <stop offset="1" stop-color="#EAB7D5"/>
+    </linearGradient>
+  </defs>
+  <path d="M15 26c0-12 6-19 17-19s17 7 17 19l3 24c-9 5-31 5-40 0l3-24Z" fill="url(#hair)" stroke="#79659F" stroke-width="2.2" stroke-linejoin="round"/>
+  <path d="M13 56c0-9 7.5-14 19-14s19 5 19 14v3H13v-3Z" fill="url(#shirt)" stroke="#A97897" stroke-width="2.2" stroke-linejoin="round"/>
+  <path d="M27 39v5a5 5 0 0 0 10 0v-5" fill="#FFE9DB" stroke="#A27C77" stroke-width="2"/>
+  <path d="m24 44 4 7 4-3 4 3 4-7" fill="#FFFAFD"/>
+  <path d="M18 24c0-8 28-8 28 0v8c0 9-6 14-14 14s-14-5-14-14v-8Z" fill="#FFF0E5" stroke="#A27C77" stroke-width="2"/>
+  <path d="M17 25c6 0 12-3 17-9 0 5 5 9 13 10-1-11-6-17-15-17s-14 6-15 16Z" fill="url(#hair)"/>
+  <path d="M25.5 29v2m13-2v2" stroke="#465C7B" stroke-width="2.8" stroke-linecap="round"/>
+  <path d="m23.5 28 1.5 1m15-1-1.5 1" stroke="#465C7B" stroke-width="1.5" stroke-linecap="round"/>
+  <ellipse cx="23" cy="34" rx="3" ry="1.8" fill="#F4B6C7"/>
+  <ellipse cx="41" cy="34" rx="3" ry="1.8" fill="#F4B6C7"/>
+  <path d="M29 35.5a4 4 0 0 0 6 0" stroke="#936875" stroke-width="2" stroke-linecap="round"/>
+  <path d="M22 15c2-2 5-3 8-3" stroke="#E8DEFF" stroke-width="2.2" stroke-linecap="round"/>
+  <path d="m45 13-6-3v9l6-3 6 3v-9l-6 3Z" fill="#BFEBDD" stroke="#6D9A92" stroke-width="1.5" stroke-linejoin="round"/>
+  <circle cx="45" cy="14.5" r="2" fill="#EFFFF7"/>
+</svg>

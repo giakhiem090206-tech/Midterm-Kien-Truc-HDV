@@ -4,14 +4,15 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Thông tin tài khoản · TDTU iBanking</title>
-    <link rel="stylesheet" href="style.css">
+    <script src="theme.js?v=theme-avatar-2"></script>
+    <link rel="stylesheet" href="style.css?v=theme-avatar-2">
 </head>
 <body data-app-page="profile">
     <div class="page-container">
         <div id="profile-error" class="alert"></div>
         <section class="panel profile-card">
             <div class="profile-hero">
-                <span class="avatar" aria-hidden="true">●</span>
+                <span class="avatar" aria-hidden="true"><img data-account-avatar src="assets/user.svg" alt="" width="48" height="48"></span>
                 <div><h2 id="profile-name">Đang tải...</h2><p>Tài khoản đã xác thực</p></div>
                 <span class="readonly-tag">Thông tin chỉ đọc</span>
             </div>
@@ -36,13 +37,14 @@
             <p class="profile-note">Thông tin này được lấy tự động từ phiên đăng nhập và không được chỉnh sửa trong màn thanh toán.</p>
         </section>
     </div>
-    <script src="common.js"></script>
+    <script src="common.js?v=theme-avatar-2"></script>
     <script>
         if (requireLogin()) loadProfile();
 
         async function loadProfile() {
             try {
                 const profile = await apiFetch(`${API_BASE}/users/me`);
+                syncAccountAvatars(profile);
                 document.getElementById('profile-name').innerText = profile.full_name;
                 document.getElementById('profile-student-id').value = profile.student_id || 'Chưa liên kết';
                 document.getElementById('profile-full-name').value = profile.full_name;
