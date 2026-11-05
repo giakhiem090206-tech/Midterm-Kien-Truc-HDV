@@ -18,4 +18,3 @@ window.IBANKING_CONFIG = {
         return `${prefix}_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
     }
 };
-
