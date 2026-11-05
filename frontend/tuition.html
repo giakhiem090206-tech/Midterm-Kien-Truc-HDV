@@ -4,7 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Thanh toán học phí</title>
-    <link rel="stylesheet" href="style.css">
+    <script src="theme.js?v=theme-avatar-2"></script>
+    <link rel="stylesheet" href="style.css?v=theme-avatar-2">
 </head>
 <body data-app-page="tuition">
     <div class="page-container top">
@@ -45,7 +46,7 @@
                 <input type="hidden" id="tuitionAmount">
                 <div class="student-found" id="student-found">
                     <div class="student-summary">
-                        <span class="avatar" aria-hidden="true">●</span>
+                        <span class="avatar" aria-hidden="true"><img id="student-avatar" src="assets/user.svg" alt="" width="32" height="32"></span>
                         <div><strong id="studentNameDisplay">Sinh viên</strong><small><span id="studentMssvDisplay"></span> · <span id="studentTermDisplay"></span></small></div>
                         <span class="student-status unpaid" id="student-status">Chưa thanh toán</span>
                     </div>
@@ -83,7 +84,7 @@
         </div>
     </div>
 
-    <script src="common.js"></script>
+    <script src="common.js?v=theme-avatar-2"></script>
     <script>
         const pageMsg = document.getElementById('page-msg');
         const mssvInput = document.getElementById('mssv');
@@ -115,6 +116,7 @@
         async function loadProfile() {
             try {
                 profile = await apiFetch(`${API_BASE}/users/me`);
+                syncAccountAvatars(profile);
                 document.getElementById('payerName').value = profile.full_name;
                 document.getElementById('payerPhone').value = profile.phone;
                 document.getElementById('payerEmail').value = profile.email;
@@ -163,6 +165,7 @@
                 document.getElementById('hocKy').value = data.HocKy;
                 document.getElementById('tuitionAmount').value = formatVND(data.SoTienPhaiNop);
                 document.getElementById('studentNameDisplay').innerText = data.HoTen;
+                document.getElementById('student-avatar').src = userAvatarSrc(data);
                 document.getElementById('studentMssvDisplay').innerText = data.MSSV || mssv;
                 document.getElementById('studentTermDisplay').innerText = data.HocKy;
                 document.getElementById('studentAmountDisplay').innerText = formatVND(data.SoTienPhaiNop);
