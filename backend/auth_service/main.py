@@ -10,7 +10,7 @@ from sqlalchemy import Column, Integer, String, Numeric, DateTime, UniqueConstra
 from sqlalchemy.orm import Session, declarative_base, sessionmaker
 from security import JWT_SECRET, get_current_user_id, verify_internal_key
 from service_app import create_app
-
+from redis_cache import get_cache, set_cache, delete_cache
 # 1. Cấu hình Database
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://root:rootpassword@db:5432/auth_db")
 JWT_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", "60"))
@@ -129,19 +129,36 @@ def login(request: LoginRequest, db: Session = Depends(get_db)):
 @app.get("/api/v1/users/me", response_model=UserProfileResponse, tags=["User"])
 def get_my_profile(user_id: int = Depends(get_current_user_id), db: Session = Depends(get_db)):
     """Lấy thông tin tài khoản đang đăng nhập (họ tên, SĐT, email, số dư)"""
+    cached_key = f"user_profile:{user_id}"
+    cached_data = get_cache(cached_key)
+    if cached_data:
+        logger.info("Lấy thông tin user %s từ Redis cache", user_id)
+        return cached_data
+    
     user = db.query(UserModel).filter(UserModel.MaNguoiDung == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="Không tìm thấy người dùng")
-    return _to_profile(user)
+    
+    profile = _to_profile(user)
+    set_cache(cached_key, profile, 300) 
+    return profile
 
 @app.get("/api/v1/users/{user_id}", response_model=UserProfileResponse, tags=["User Internal"],
          dependencies=[Depends(verify_internal_key)])
 def get_user_by_id(user_id: int, db: Session = Depends(get_db)):
     """API nội bộ: Lấy thông tin người dùng theo ID cho các Service khác gọi"""
+    cached_key = f"user_profile:{user_id}"
+    cached_data = get_cache(cached_key)
+    if cached_data:
+        logger.info("Lấy thông tin user %s từ Redis cache", user_id)
+        return cached_data
+    
     user = db.query(UserModel).filter(UserModel.MaNguoiDung == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="Không tìm thấy người dùng")
-    return _to_profile(user)
+    profile = _to_profile(user)
+    set_cache(cached_key, profile, 300)
+    return profile
 
 @app.post("/api/v1/users/{user_id}/deduct-balance", response_model=BalanceChangeResponse, tags=["User Internal"],
           dependencies=[Depends(verify_internal_key)])
@@ -179,7 +196,7 @@ def deduct_balance(user_id: int, request: BalanceChangeRequest, db: Session = De
     db.commit()
     logger.info("Giao dịch %s: trừ %s của MaNguoiDung=%s, số dư còn %s",
                 request.transaction_id, request.amount, user_id, user.SoDuKhaDung)
-
+    delete_cache(f"user_profile:{user_id}") 
     return {
         "status": "SUCCESS",
         "MaNguoiDung": user_id,
@@ -221,7 +238,7 @@ def refund_balance(user_id: int, request: BalanceChangeRequest, db: Session = De
     db.commit()
     logger.info("Giao dịch %s: hoàn %s cho MaNguoiDung=%s, số dư còn %s",
                 request.transaction_id, request.amount, user_id, user.SoDuKhaDung)
-
+    delete_cache(f"user_profile:{user_id}")
     return {
         "status": "SUCCESS",
         "MaNguoiDung": user_id,

@@ -6,7 +6,7 @@ from sqlalchemy import Column, Integer, String, Numeric, create_engine, text
 from sqlalchemy.orm import Session, declarative_base, sessionmaker
 from security import get_current_user_id, verify_internal_key
 from service_app import create_app
-
+from redis_cache import get_cache, set_cache, delete_cache
 # 1. Cấu hình Database
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://root:rootpassword@db:5432/tuition_db")
 
@@ -82,12 +82,21 @@ def lookup_tuition(
     """
     Tra cứu khoản học phí CHƯA_ĐÓNG của sinh viên theo MSSV (Dành cho Frontend, cần đăng nhập)
     """
-    sv = db.query(SinhVienModel).filter(SinhVienModel.MSSV == mssv.strip().upper()).first()
+    normalized_mssv = mssv.strip().upper()
+    cache_key = f"tuition:{normalized_mssv}"
+    cached_data = get_cache(cache_key)
+    if cached_data is not None:
+        logger.info("⚡ Cache Hit cho sinh viên: %s", normalized_mssv)
+        return cached_data
+    
+    sv = db.query(SinhVienModel).filter(SinhVienModel.MSSV == normalized_mssv).first()
     if not sv:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Không tìm thấy sinh viên"
         )
+
+
 
     # Tìm khoản học phí chưa đóng
     hp = db.query(HocPhiModel).filter(
@@ -101,7 +110,7 @@ def lookup_tuition(
             detail="Sinh viên không có khoản học phí cần nộp hoặc đã đóng đủ"
         )
 
-    return {
+    result = {
         "MaHocPhi": hp.MaHocPhi,
         "MSSV": sv.MSSV,
         "HoTen": sv.HoTen,
@@ -109,6 +118,9 @@ def lookup_tuition(
         "SoTienPhaiNop": float(hp.SoTienPhaiNop),
         "TrangThai": hp.TrangThai
     }
+    set_cache(cache_key, result, ttl_seconds=300)  
+    logger.info("Cache Miss cho sinh viên: %s. Đã lưu vào cache.", normalized_mssv)
+    return result
 
 @app.get("/api/v1/tuitions/detail/{ma_hoc_phi}", response_model=TuitionDetailResponse, tags=["Tuition Internal"],
          dependencies=[Depends(verify_internal_key)])
@@ -137,8 +149,12 @@ def mark_tuition_as_paid(ma_hoc_phi: int, request: MarkPaidRequest, db: Session 
     """
     API nội bộ: Được gọi bởi Payment Service để cập nhật gạch nợ học phí sang DA_DONG
     """
-    # UPDATE có điều kiện (atomic): khi 2 request cùng gạch nợ 1 khoản, Postgres khoá dòng,
-    # request sau chờ request trước commit rồi đánh giá lại WHERE -> 0 dòng được cập nhật
+    # 1. Tìm khoản học phí trước để lấy MSSV phục vụ việc xóa cache
+    hp = db.query(HocPhiModel).filter(HocPhiModel.MaHocPhi == ma_hoc_phi).first()
+    if not hp:
+        raise HTTPException(status_code=404, detail="Khoản học phí không tồn tại")
+
+    # 2. UPDATE có điều kiện (atomic)
     updated = db.query(HocPhiModel).filter(
         HocPhiModel.MaHocPhi == ma_hoc_phi,
         HocPhiModel.TrangThai == "CHUA_DONG"
@@ -148,24 +164,28 @@ def mark_tuition_as_paid(ma_hoc_phi: int, request: MarkPaidRequest, db: Session 
     }, synchronize_session=False)
     db.commit()
 
-    if updated == 0:
-        hp = db.query(HocPhiModel).filter(HocPhiModel.MaHocPhi == ma_hoc_phi).first()
-        if not hp:
-            raise HTTPException(status_code=404, detail="Khoản học phí không tồn tại")
-        if hp.TrangThai == "DA_DONG" and hp.MaGiaoDichThanhToan == request.transaction_id:
-            logger.info("Giao dịch %s đã gạch nợ MaHocPhi=%s trước đó (idempotent)", request.transaction_id, ma_hoc_phi)
-            return {
-                "status": "SUCCESS",
-                "MaHocPhi": ma_hoc_phi,
-                "message": "Khoản học phí đã được ghi nhận cho giao dịch này"
-            }
-        logger.warning("Giao dịch %s bị từ chối: MaHocPhi=%s đã được giao dịch %s thanh toán",
-                       request.transaction_id, ma_hoc_phi, hp.MaGiaoDichThanhToan)
-        raise HTTPException(status_code=409, detail="Khoản học phí này đã được thanh toán trước đó")
+    # 3. Nếu gạch nợ thành công lần đầu (updated == 1)
+    if updated > 0:
+        delete_cache(f"tuition:{hp.MSSV}")  #  Xóa cache ngay khi thanh toán thành công!
+        logger.info("Giao dịch %s: gạch nợ MaHocPhi=%s thành công, đã xóa cache cho sinh viên %s", 
+                    request.transaction_id, ma_hoc_phi, hp.MSSV)
+        return {
+            "status": "SUCCESS",
+            "MaHocPhi": ma_hoc_phi,
+            "message": "Đã gạch nợ học phí thành công"
+        }
 
-    logger.info("Giao dịch %s: gạch nợ MaHocPhi=%s", request.transaction_id, ma_hoc_phi)
-    return {
-        "status": "SUCCESS",
-        "MaHocPhi": ma_hoc_phi,
-        "message": "Đã gạch nợ học phí thành công"
-    }
+    # 4. Nếu updated == 0 (Khoản học phí đã được đóng từ trước)
+    db.refresh(hp)
+    if hp.TrangThai == "DA_DONG" and hp.MaGiaoDichThanhToan == request.transaction_id:
+        logger.info("Giao dịch %s đã gạch nợ MaHocPhi=%s trước đó (idempotent)", request.transaction_id, ma_hoc_phi)
+        delete_cache(f"tuition:{hp.MSSV}")
+        return {
+            "status": "SUCCESS",
+            "MaHocPhi": ma_hoc_phi,
+            "message": "Khoản học phí đã được ghi nhận cho giao dịch này"
+        }
+
+    logger.warning("Giao dịch %s bị từ chối: MaHocPhi=%s đã được giao dịch %s thanh toán",
+                   request.transaction_id, ma_hoc_phi, hp.MaGiaoDichThanhToan)
+    raise HTTPException(status_code=409, detail="Khoản học phí này đã được thanh toán trước đó")
