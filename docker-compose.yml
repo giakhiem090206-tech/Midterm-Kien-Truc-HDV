@@ -29,6 +29,21 @@ services:
       timeout: 3s
       retries: 20
 
+  redis:
+    image: redis:alpine
+    container_name: ibanking-redis
+    ports:
+      - "6379:6379"
+
+  # Thêm giao diện quản lý RedisInsight
+  redisinsight:
+    image: redis/redisinsight:latest
+    container_name: ibanking-redisinsight
+    ports:
+      - "5540:5540"
+    depends_on:
+      - redis
+
   # Build từ thư mục backend/ để mỗi service chép được module dùng chung backend/shared
   auth-service:
     build:
@@ -38,9 +53,12 @@ services:
       - DATABASE_URL=postgresql://root:rootpassword@db:5432/auth_db
       - JWT_SECRET=${JWT_SECRET:-ibanking-dev-jwt-secret-change-me-0123456789}
       - INTERNAL_API_KEY=${INTERNAL_API_KEY:-ibanking-dev-internal-key}
+      - REDIS_URL=redis://redis:6379/0
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_started
 
   tuition-service:
     build:
@@ -50,9 +68,12 @@ services:
       - DATABASE_URL=postgresql://root:rootpassword@db:5432/tuition_db
       - JWT_SECRET=${JWT_SECRET:-ibanking-dev-jwt-secret-change-me-0123456789}
       - INTERNAL_API_KEY=${INTERNAL_API_KEY:-ibanking-dev-internal-key}
+      - REDIS_URL=redis://redis:6379/0
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_started
 
   payment-service:
     build:
@@ -65,6 +86,7 @@ services:
       - AUTH_SERVICE_URL=http://auth-service:8001
       - TUITION_SERVICE_URL=http://tuition-service:8002
       - NOTIFICATION_SERVICE_URL=http://notification-service:8004
+      - REDIS_URL=redis://redis:6379/0
     depends_on:
       db:
         condition: service_healthy
@@ -73,6 +95,8 @@ services:
       tuition-service:
         condition: service_started
       notification-service:
+        condition: service_started
+      redis:
         condition: service_started
 
   # Gửi OTP và biên lai qua Gmail SMTP; thông tin xác thực lấy từ .env

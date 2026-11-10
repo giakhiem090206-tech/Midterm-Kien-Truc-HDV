@@ -1,3 +1,4 @@
+import json
 import os
 import uuid
 import secrets
@@ -15,6 +16,7 @@ from sqlalchemy.orm import Session, declarative_base, sessionmaker
 from observability import set_request_id, tracing_headers
 from security import INTERNAL_API_KEY, get_current_user_id
 from service_app import create_app
+from redis_cache import get_cache, set_cache, delete_cache
 
 # 1. Cấu hình Database & Endpoint của các Service khác
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://root:rootpassword@db:5432/payment_db")
@@ -394,7 +396,7 @@ def create_payment(
         existing = _find_by_idempotency_key(db, user_id, idempotency_key)
         if existing:
             return _replay_idempotent_request(db, existing, request, response)
-
+    delete_cache(f"payment_history:{user_id}")
     if tuition_data["TrangThai"] != "CHUA_DONG":
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -515,19 +517,28 @@ def confirm_payment(
     result = _continue_payment(transaction_id)
     if result is None:
         raise HTTPException(status_code=409, detail="Giao dịch đã được xử lý")
+    delete_cache(f"payment_history:{user_id}")
     return result
 
 @app.get("/api/v1/payments", response_model=List[TransactionDetail], tags=["Payment"])
 def get_payment_history(user_id: int = Depends(get_current_user_id), db: Session = Depends(get_db)):
     """Lấy lịch sử giao dịch của người dùng đang đăng nhập"""
     _expire_stale_transactions(db, user_id)
+    cached_key = f"payment_history:{user_id}"
+    cached_data = get_cache(cached_key)
+    if cached_data:
+        logger.info("Lấy lịch sử giao dịch của user %s từ Redis cache", user_id)
+        return cached_data
+    
     history = (
         db.query(GiaoDichModel)
         .filter(GiaoDichModel.MaNguoiDung == user_id)
         .order_by(GiaoDichModel.NgayGiaoDich.desc())
         .all()
     )
-    return [_to_detail(item) for item in history]
+    result = [_to_detail(item) for item in history]
+    set_cache(cached_key, result, 120) 
+    return result
 
 @app.get("/api/v1/payments/{transaction_id}", response_model=TransactionDetail, tags=["Payment"])
 def get_payment(transaction_id: str, user_id: int = Depends(get_current_user_id), db: Session = Depends(get_db)):
