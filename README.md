@@ -43,8 +43,6 @@ Nếu Docker không kết nối được Engine, mở Docker Desktop và đợi 
 |---|---|---|---|
 | `phuc123` | `123456` | `524K0011` | `524k0011@student.tdtu.edu.vn` |
 | `khiem123` | `123456` | `524K0006` | `524k0006@student.tdtu.edu.vn` |
-| `tin123` | `123456` | `524K0033` | `524k0033@student.tdtu.edu.vn` |
-| `nhu123` | `123456` | `524V0007` | `524v0007@student.tdtu.edu.vn` |
 | `nhi123` | `123456` | `523V0005` | `523v0005@student.tdtu.edu.vn` |
 
 Một tài khoản có thể thanh toán học phí cho nhiều sinh viên. MSSV cần đóng được nhập và tra cứu riêng trên trang **Đóng học phí**; email nhận OTP vẫn luôn là email cố định của tài khoản đang đăng nhập.
