@@ -6,9 +6,6 @@ import redis
 
 logger = logging.getLogger("redis_cache")
 
-# Cấu hình kết nối:
-# - Trong Docker container: host là 'redis' (hoặc đọc từ biến REDIS_URL)
-# - Chạy trực tiếp trên máy host: host là 'localhost'
 REDIS_URL = os.getenv("REDIS_URL")
 if REDIS_URL:
     r = redis.Redis.from_url(REDIS_URL, decode_responses=True)
@@ -24,9 +21,6 @@ else:
         socket_timeout=2,
     )
 
-# 1. Kiểm tra kết nối khi khởi động:
-# Nếu Redis chưa bật hoặc lỗi, KHÔNG để app bị crash. 
-# Thay vào đó chỉ in cảnh báo để app tiếp tục chạy và tự động dùng PostgreSQL.
 try:
     r.ping()
     print("Connected to Redis")
@@ -34,14 +28,8 @@ except (redis.ConnectionError, redis.TimeoutError, Exception) as e:
     print(f"Error connecting to Redis: {e}. Falling back to postgreSQL.")
 
 
-# 2. Các hàm thao tác Cache có sẵn cơ chế Fallback sang PostgreSQL:
 
 def get_cache(key: str) -> Optional[Any]:
-    """
-    Đọc dữ liệu từ Redis.
-    Nếu Redis lỗi hoặc không tìm thấy key (Cache Miss), hàm trả về None.
-    -> Lúc này service gọi hàm sẽ tự động tiếp tục truy vấn từ PostgreSQL.
-    """
     try:
         data = r.get(key)
         if data is not None:
@@ -52,10 +40,6 @@ def get_cache(key: str) -> Optional[Any]:
 
 
 def set_cache(key: str, value: Any, ttl_seconds: int = 300) -> bool:
-    """
-    Lưu dữ liệu vào Redis với thời gian sống TTL (mặc định 300s = 5 phút).
-    Nếu Redis gặp sự cố, ghi nhận cảnh báo và bỏ qua (không làm lỗi luồng chính).
-    """
     try:
         serialized = json.dumps(value) if not isinstance(value, str) else value
         r.setex(key, ttl_seconds, serialized)
@@ -66,10 +50,6 @@ def set_cache(key: str, value: Any, ttl_seconds: int = 300) -> bool:
 
 
 def delete_cache(key: str) -> bool:
-    """
-    Xóa cache khi dữ liệu bị thay đổi (Cache Invalidation).
-    Nếu Redis lỗi, ghi nhận cảnh báo và bỏ qua.
-    """
     try:
         r.delete(key)
         return True

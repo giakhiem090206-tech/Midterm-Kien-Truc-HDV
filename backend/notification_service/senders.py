@@ -60,10 +60,8 @@ def build_senders() -> dict:
         raise ValueError(f"EMAIL_PROVIDER không hợp lệ: {provider}")
     return {"email": providers[provider]()}
 
-# Khởi tạo instance để các service khác import
 notification_service = build_senders()["email"]
 
-# Hàm tiện ích tương thích với luồng gọi cũ
 def send_otp_email(to_email: str, otp_code: str):
     html_content = f"<h3>TDTU iBanking</h3><p>Mã OTP của bạn là: <b>{otp_code}</b>. Có hiệu lực trong 5 phút.</p>"
     notification_service.send(to_email, "[TDTU iBanking] Mã xác thực OTP", html_content)

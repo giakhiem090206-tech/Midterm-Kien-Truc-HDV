@@ -1,17 +1,4 @@
-"""
-Script demo / kiểm thử hệ thống qua REST API (chỉ dùng thư viện chuẩn của Python).
 
-Cách chạy (sau khi `docker compose up -d`):
-    python tests/demo_test.py api            # luồng chính + các mã lỗi HTTP
-    python tests/demo_test.py concurrency1   # tự đóng học phí; kiểm tra gửi OTP
-    python tests/demo_test.py concurrency2   # trả học phí cho sinh viên khác; kiểm tra gửi OTP
-    python tests/demo_test.py self_payment_all  # tự đóng học phí và gửi OTP cho từng tài khoản demo
-    python tests/demo_test.py gateway        # Swagger qua Gateway + Gateway chỉ mở API công khai
-    python tests/demo_test.py otp            # OTP: nhập sai đủ 3 lần, OTP hết hạn sau 5 phút
-
-Mỗi kịch bản cần dữ liệu ban đầu, reset trước khi chạy:
-    docker compose down -v; docker compose up -d --wait
-"""
 import json
 import os
 import re
@@ -25,7 +12,6 @@ import urllib.request
 
 sys.stdout.reconfigure(encoding="utf-8")
 
-# Mọi API đi qua API Gateway; stack kiểm thử dùng DEMO_GATEWAY_URL=http://localhost:18080/api/v1
 GATEWAY = os.getenv("DEMO_GATEWAY_URL", "http://localhost/api/v1")
 AUTH = TUITION = PAYMENT = GATEWAY
 
@@ -86,7 +72,6 @@ def confirm(token, txn, otp):
 
 
 def otp_from_email(txn):
-    """Nhận OTP người nộp đọc từ email tài khoản của họ."""
     otp = input(
         f"  Mở email tài khoản người nộp, lấy OTP giao dịch {txn} (hiệu lực 5 phút): "
     ).strip()
@@ -96,7 +81,6 @@ def otp_from_email(txn):
 
 
 def run_concurrently(*funcs):
-    """Chạy các hàm cùng lúc (dùng Barrier để các request xuất phát đồng thời)"""
     results = [None] * len(funcs)
     barrier = threading.Barrier(len(funcs))
 
@@ -332,10 +316,6 @@ def http_get(url):
 
 
 def expire_otp(transaction_id):
-    """
-    Giả lập đã quá 5 phút: lùi thời điểm hết hạn OTP của giao dịch về quá khứ trong payment_db
-    (không phải chờ thật). Dùng cùng project/compose file với stack đang test.
-    """
     command = ["docker", "compose"]
     for path in filter(None, os.getenv("TEST_COMPOSE_FILES", "").split(";")):
         command += ["-f", path]
@@ -393,12 +373,6 @@ def scenario_otp():
 
 
 def scenario_gateway():
-    """
-    Đọc tài liệu Swagger (openapi.json) của từng service qua Gateway, rồi gọi thử MỌI API trong đó
-    (không kèm token, không gây thay đổi dữ liệu):
-      - API công khai phải đi tới được service: nhận 400/401 do service trả, không bị Gateway chặn
-      - API nội bộ (tag chứa "Internal") phải bị Gateway chặn bằng 404
-    """
     print("=== Swagger qua Gateway & định tuyến của Gateway ===")
     s, html = http_get(f"{GATEWAY_ROOT}/")
     check_true(f"Trang chủ {GATEWAY_ROOT}/ hiện trang đăng nhập (HTTP {s})", s == 200 and "login-form" in html)

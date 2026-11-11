@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session, declarative_base, sessionmaker
 from security import JWT_SECRET, get_current_user_id, verify_internal_key
 from service_app import create_app
 from redis_cache import get_cache, set_cache, delete_cache
-# 1. Cấu hình Database
+
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://root:rootpassword@db:5432/auth_db")
 JWT_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", "60"))
 
@@ -19,7 +19,6 @@ engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-# 2. Model "NguoiDung"
 class UserModel(Base):
     __tablename__ = "NguoiDung"
     MaNguoiDung = Column(Integer, primary_key=True, index=True)
@@ -47,16 +46,13 @@ def get_db():
     finally:
         db.close()
 
-# 3. Khởi tạo FastAPI
 @asynccontextmanager
 async def lifespan(app):
-    # Sổ ghi trừ/hoàn tiền theo mã giao dịch (idempotency) cho DB tạo trước khi có bảng này
     BalanceOperationModel.__table__.create(bind=engine, checkfirst=True)
     yield
 
 app, logger = create_app("Auth Service", "auth-service", docs_prefix="/api/v1/auth", lifespan=lifespan)
 
-# 4. Pydantic Schemas
 class LoginRequest(BaseModel):
     username: str = Field(min_length=1, max_length=50)
     password: str = Field(min_length=1, max_length=255)
@@ -97,11 +93,10 @@ def _to_profile(user: UserModel) -> dict:
         "available_balance": float(user.SoDuKhaDung)
     }
 
-# 5. API Endpoints
 
 @app.post("/api/v1/auth/login", response_model=LoginResponse, tags=["Auth"])
 def login(request: LoginRequest, db: Session = Depends(get_db)):
-    """Đăng nhập tài khoản hệ thống, trả về JWT access token"""
+    """Login --> Return JWT token in sessionStorage"""
     user = db.query(UserModel).filter(
         UserModel.TenDangNhap == request.username,
         UserModel.MatKhau == request.password
@@ -128,7 +123,7 @@ def login(request: LoginRequest, db: Session = Depends(get_db)):
 
 @app.get("/api/v1/users/me", response_model=UserProfileResponse, tags=["User"])
 def get_my_profile(user_id: int = Depends(get_current_user_id), db: Session = Depends(get_db)):
-    """Lấy thông tin tài khoản đang đăng nhập (họ tên, SĐT, email, số dư)"""
+    """Get data of current user (from JWT token)"""
     cached_key = f"user_profile:{user_id}"
     cached_data = get_cache(cached_key)
     if cached_data:
@@ -146,7 +141,7 @@ def get_my_profile(user_id: int = Depends(get_current_user_id), db: Session = De
 @app.get("/api/v1/users/{user_id}", response_model=UserProfileResponse, tags=["User Internal"],
          dependencies=[Depends(verify_internal_key)])
 def get_user_by_id(user_id: int, db: Session = Depends(get_db)):
-    """API nội bộ: Lấy thông tin người dùng theo ID cho các Service khác gọi"""
+    """API: Get information of a user by ID for other services to call"""
     cached_key = f"user_profile:{user_id}"
     cached_data = get_cache(cached_key)
     if cached_data:
@@ -163,9 +158,6 @@ def get_user_by_id(user_id: int, db: Session = Depends(get_db)):
 @app.post("/api/v1/users/{user_id}/deduct-balance", response_model=BalanceChangeResponse, tags=["User Internal"],
           dependencies=[Depends(verify_internal_key)])
 def deduct_balance(user_id: int, request: BalanceChangeRequest, db: Session = Depends(get_db)):
-    """API nội bộ: Được gọi bởi Payment Service để trừ số dư tài khoản"""
-    # Khoá dòng (SELECT ... FOR UPDATE): các request trừ tiền đồng thời trên cùng
-    # tài khoản phải xếp hàng, request sau đọc lại số dư đã bị trừ bởi request trước
     user = db.query(UserModel).filter(UserModel.MaNguoiDung == user_id).with_for_update().first()
     if not user:
         db.rollback()
@@ -206,7 +198,7 @@ def deduct_balance(user_id: int, request: BalanceChangeRequest, db: Session = De
 @app.post("/api/v1/users/{user_id}/refund", response_model=BalanceChangeResponse, tags=["User Internal"],
           dependencies=[Depends(verify_internal_key)])
 def refund_balance(user_id: int, request: BalanceChangeRequest, db: Session = Depends(get_db)):
-    """API nội bộ: Payment Service hoàn tiền khi giao dịch thất bại sau khi đã trừ tiền"""
+    """API: Payment Service refund money to user after a failed transaction"""
     debit = db.query(BalanceOperationModel).filter(
         BalanceOperationModel.MaGiaoDich == request.transaction_id,
         BalanceOperationModel.Loai == "DEBIT"

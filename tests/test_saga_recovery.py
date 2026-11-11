@@ -1,8 +1,4 @@
-"""Integration checks for idempotency and automatic payment-saga recovery.
 
-Run against a fresh `docker compose up -d --build` stack. The recovery test
-temporarily stops tuition-service and always starts it again in a finally block.
-"""
 import json
 import os
 import subprocess
@@ -12,7 +8,6 @@ import urllib.error
 import urllib.request
 
 
-# Mọi API đi qua API Gateway; stack kiểm thử dùng DEMO_GATEWAY_URL=http://localhost:18080/api/v1
 GATEWAY = os.getenv("DEMO_GATEWAY_URL", "http://localhost/api/v1")
 AUTH = TUITION = PAYMENT = GATEWAY
 COMPOSE_FILES = os.getenv("TEST_COMPOSE_FILES", "").split(";")

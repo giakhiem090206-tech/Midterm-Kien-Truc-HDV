@@ -1,6 +1,4 @@
-# Tuỳ chọn khi phát triển/debug: mở port của các service và PostgreSQL ra máy host
-# (bình thường mọi request đi qua API Gateway http://localhost).
-#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+
 services:
   db:
     ports:

@@ -1,4 +1,3 @@
-"""Xác thực dùng chung: JWT của người dùng (do Auth Service cấp) và khoá gọi API nội bộ giữa các service"""
 import os
 from typing import Optional
 import jwt
@@ -12,7 +11,6 @@ _bearer_scheme = HTTPBearer(auto_error=False)
 
 
 def get_current_user_id(credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer_scheme)) -> int:
-    """Lấy MaNguoiDung từ JWT trong header Authorization: Bearer <token>"""
     if credentials is None:
         raise HTTPException(status_code=401, detail="Bạn chưa đăng nhập")
     try:
@@ -25,6 +23,5 @@ def get_current_user_id(credentials: Optional[HTTPAuthorizationCredentials] = De
 
 
 def verify_internal_key(x_internal_key: Optional[str] = Header(None)):
-    """API nội bộ chỉ cho các service khác gọi (kèm header X-Internal-Key)"""
     if x_internal_key != INTERNAL_API_KEY:
         raise HTTPException(status_code=403, detail="Chỉ dành cho service nội bộ")

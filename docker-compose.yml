@@ -1,13 +1,11 @@
 
-# Cổng vào duy nhất: API Gateway http://localhost (giao diện web + /api/v1/...).
-# Các service và database chỉ giao tiếp trong mạng Docker, không mở port ra máy host.
-# Cần gọi thẳng service để debug: docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 name: midterm_soa_demo
 
 services:
-  # Một PostgreSQL instance chứa các database riêng theo từng service.
   db:
     image: postgres:15-alpine
+    ports:
+      - "5433:5432"
     environment:
       POSTGRES_USER: root
       POSTGRES_PASSWORD: rootpassword
@@ -35,7 +33,6 @@ services:
     ports:
       - "6379:6379"
 
-  # Thêm giao diện quản lý RedisInsight
   redisinsight:
     image: redis/redisinsight:latest
     container_name: ibanking-redisinsight
@@ -44,7 +41,6 @@ services:
     depends_on:
       - redis
 
-  # Build từ thư mục backend/ để mỗi service chép được module dùng chung backend/shared
   auth-service:
     build:
       context: ./backend
@@ -99,7 +95,6 @@ services:
       redis:
         condition: service_started
 
-  # Gửi OTP và biên lai qua Gmail SMTP; thông tin xác thực lấy từ .env
   notification-service:
     build:
       context: ./backend
@@ -114,7 +109,6 @@ services:
       - SMTP_USE_TLS=${SMTP_USE_TLS:-true}
       - MAIL_FROM=${MAIL_FROM:-}
 
-  # API Gateway (Nginx): phục vụ giao diện web và định tuyến /api/v1/... tới các service
   gateway:
     image: nginx:alpine
     ports:

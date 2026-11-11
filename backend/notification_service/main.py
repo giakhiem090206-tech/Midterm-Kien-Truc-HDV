@@ -7,17 +7,12 @@ from security import verify_internal_key
 from senders import build_senders
 from service_app import create_app
 
-# 1. Cấu hình
 VN_TZ = timezone(timedelta(hours=7))
 
-# Adapter cho từng kênh gửi (xem senders.py)
 SENDERS = build_senders()
 
-# 2. Khởi tạo FastAPI
-# Service nội bộ: API Gateway không mở ra ngoài, Swagger chỉ xem được khi chạy docker-compose.dev.yml
 app, logger = create_app("Notification Service", "notification-service")
 
-# 3. Mẫu nội dung thông báo
 def _format_vnd(amount) -> str:
     return f"{float(amount):,.0f}".replace(",", ".") + " VNĐ"
 
@@ -76,7 +71,6 @@ TEMPLATES = {
     "PAYMENT_SUCCESS": _render_payment_success,
 }
 
-# 4. Pydantic Schemas
 class NotificationRequest(BaseModel):
     channel: str = "email"
     to: str = Field(min_length=3, max_length=100)
@@ -88,7 +82,6 @@ class NotificationResponse(BaseModel):
     channel: str
     to: str
 
-# 5. API Endpoints
 
 @app.post("/api/v1/notifications", response_model=NotificationResponse, status_code=status.HTTP_201_CREATED,
           tags=["Notification Internal"], dependencies=[Depends(verify_internal_key)])

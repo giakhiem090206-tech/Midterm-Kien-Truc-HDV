@@ -18,11 +18,9 @@ from security import INTERNAL_API_KEY, get_current_user_id
 from service_app import create_app
 from redis_cache import get_cache, set_cache, delete_cache
 
-# 1. Cấu hình Database & Endpoint của các Service khác
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://root:rootpassword@db:5432/payment_db")
 AUTH_SERVICE_URL = os.getenv("AUTH_SERVICE_URL", "http://auth-service:8001")
 TUITION_SERVICE_URL = os.getenv("TUITION_SERVICE_URL", "http://tuition-service:8002")
-# Gửi email (OTP, xác nhận) qua Notification Service, không gọi SMTP trực tiếp
 NOTIFICATION_SERVICE_URL = os.getenv("NOTIFICATION_SERVICE_URL", "http://notification-service:8004")
 
 OTP_TTL_MINUTES = 5
@@ -32,8 +30,6 @@ engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-# 2. Database Models nội bộ của Payment Service
-# (Số dư thuộc Auth Service, học phí thuộc Tuition Service -> chỉ truy cập qua REST API)
 class GiaoDichModel(Base):
     __tablename__ = "GiaoDich"
     MaGiaoDich = Column(String(50), primary_key=True)
@@ -45,7 +41,7 @@ class GiaoDichModel(Base):
     NgayGiaoDich = Column(DateTime, nullable=False)
     TrangThai = Column(String(30), nullable=False)  # 'PENDING', 'PROCESSING', 'SUCCESS', 'FAILED'
     UpdatedAt = Column(DateTime, nullable=False, default=datetime.utcnow)
-    IdempotencyKey = Column(String(100), nullable=True)  # duy nhất theo (MaNguoiDung, IdempotencyKey)
+    IdempotencyKey = Column(String(100), nullable=True)  
 
 class XacThucOTPModel(Base):
     __tablename__ = "XacThucOTP"
@@ -64,12 +60,10 @@ def get_db():
     finally:
         db.close()
 
-# 3. Khởi tạo FastAPI
 _recovery_stop = threading.Event()
 
 @asynccontextmanager
 async def lifespan(app):
-    # Migration cộng thêm cho DB tạo trước khi có saga recovery / Idempotency-Key
     with engine.begin() as connection:
         connection.execute(text(
             'ALTER TABLE "GiaoDich" ADD COLUMN IF NOT EXISTS "UpdatedAt" '
@@ -82,7 +76,6 @@ async def lifespan(app):
             'CREATE UNIQUE INDEX IF NOT EXISTS "uq_giaodich_idempotency" '
             'ON "GiaoDich" ("MaNguoiDung", "IdempotencyKey")'
         ))
-    # Worker nền tự thử lại các giao dịch PROCESSING bị dở dang
     _recovery_stop.clear()
     recovery_worker = threading.Thread(
         target=_recovery_loop,
@@ -102,7 +95,6 @@ def internal_client() -> httpx.Client:
     """HTTP client gọi API nội bộ của Auth/Tuition/Notification Service (kèm X-Request-ID để tracing)"""
     return httpx.Client(timeout=10, headers={"X-Internal-Key": INTERNAL_API_KEY, **tracing_headers()})
 
-# 4. Pydantic Schemas
 class CreatePaymentRequest(BaseModel):
     MaHocPhi: int = Field(gt=0)
 
@@ -194,7 +186,6 @@ def _to_detail(gd: GiaoDichModel, otp: Optional[XacThucOTPModel] = None) -> dict
         "otp_expires_at": _iso_utc(otp.ThoiGianHetHan) if otp else None
     }
 
-# 5. Gửi thông báo qua Notification Service
 def _notify(to: str, template: str, data: dict):
     """Gọi Notification Service gửi email theo mẫu, ném exception nếu gửi thất bại"""
     with internal_client() as client:
@@ -296,7 +287,6 @@ def _continue_payment(transaction_id: str):
                 if tuition_res.status_code not in (400, 404, 409):
                     _retry_transaction(db, gd, "Tuition Service lỗi tạm thời; giao dịch sẽ được thử lại")
 
-                # A definitive tuition rejection requires an idempotent compensation.
                 try:
                     refund_res = client.post(
                         f"{AUTH_SERVICE_URL}/api/v1/users/{gd.MaNguoiDung}/refund",
@@ -313,7 +303,6 @@ def _continue_payment(transaction_id: str):
         db.commit()
         new_balance = deduct_res.json()["new_balance"]
         logger.info("Giao dịch %s -> SUCCESS (MSSV %s, %s)", gd.MaGiaoDich, gd.MSSV, gd.SoTienGiaoDich)
-        # copy_context: thread gửi mail giữ nguyên request ID của request hiện tại
         threading.Thread(
             target=contextvars.copy_context().run,
             args=(_send_success_email, gd.MaGiaoDich, gd.MaNguoiDung, gd.MSSV, gd.TenSinhVien,
@@ -345,7 +334,6 @@ def _recovery_loop():
         finally:
             db.close()
         for transaction_id in transaction_ids:
-            # Mỗi lần phục hồi có request ID riêng để lần theo qua Auth/Tuition/Notification
             set_request_id(f"recovery-{uuid.uuid4().hex[:12]}")
             logger.info("Phục hồi giao dịch %s", transaction_id)
             try:
@@ -355,9 +343,6 @@ def _recovery_loop():
             except Exception as exc:
                 logger.error("Không phục hồi được giao dịch %s: %s", transaction_id, exc)
 
-# 6. API Endpoints
-# Lưu ý: dùng `def` (không phải `async def`) để FastAPI chạy trong threadpool,
-# tránh việc truy vấn DB có khoá dòng chặn event loop khi nhiều request đồng thời.
 
 @app.post("/api/v1/payments", response_model=CreatePaymentResponse, status_code=status.HTTP_201_CREATED, tags=["Payment"])
 def create_payment(
@@ -376,9 +361,7 @@ def create_payment(
     """
     try:
         with internal_client() as client:
-            # Gọi Auth Service lấy thông tin người dùng & số dư
             user_res = client.get(f"{AUTH_SERVICE_URL}/api/v1/users/{user_id}")
-            # Gọi Tuition Service lấy thông tin khoản học phí
             tuition_res = client.get(f"{TUITION_SERVICE_URL}/api/v1/tuitions/detail/{request.MaHocPhi}")
     except httpx.HTTPError:
         raise HTTPException(status_code=503, detail="Không kết nối được tới Auth/Tuition Service")
@@ -403,14 +386,12 @@ def create_payment(
             detail="Khoản học phí này đã được thanh toán"
         )
 
-    # Kiểm tra số dư khả dụng
     if float(user_data["available_balance"]) < float(tuition_data["SoTienPhaiNop"]):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Số dư khả dụng không đủ để thực hiện giao dịch"
         )
 
-    # Tạo giao dịch PENDING (uuid để không trùng mã khi nhiều giao dịch tạo cùng lúc)
     ma_giao_dich = f"TXN_{uuid.uuid4().hex}"
     now = datetime.utcnow()
     gd = GiaoDichModel(
@@ -426,7 +407,6 @@ def create_payment(
     )
     db.add(gd)
 
-    # Sinh OTP 6 số ngẫu nhiên gắn với giao dịch, hết hạn sau 5 phút
     ma_code = _generate_unique_otp(db)
     otp = XacThucOTPModel(
         MaGiaoDich=ma_giao_dich,
@@ -440,15 +420,12 @@ def create_payment(
     try:
         db.commit()
     except IntegrityError:
-        # 2 request cùng Idempotency-Key tới đồng thời: request sau vướng ràng buộc UNIQUE
-        # (MaNguoiDung, IdempotencyKey) -> trả lại giao dịch mà request trước đã tạo
         db.rollback()
         existing = _find_by_idempotency_key(db, user_id, idempotency_key) if idempotency_key else None
         if not existing:
             raise
         return _replay_idempotent_request(db, existing, request, response)
 
-    # Gửi OTP qua email của người nộp tiền (qua Notification Service)
     try:
         _notify(user_data["email"], "OTP", {
             "full_name": user_data["full_name"],
@@ -482,7 +459,6 @@ def confirm_payment(
     """
     Xác nhận OTP, trừ tiền tài khoản, gạch nợ học phí và lưu lịch sử
     """
-    # --- BƯỚC 1: Khoá giao dịch để 2 request confirm cùng lúc không xử lý trùng ---
     gd = _get_own_transaction(db, transaction_id, user_id, lock=True)
 
     if gd.TrangThai != "PENDING":
@@ -508,7 +484,6 @@ def confirm_payment(
         remaining = OTP_MAX_ATTEMPTS - otp.SoLanNhapSai
         raise HTTPException(status_code=400, detail=f"Mã OTP không chính xác (còn {remaining} lần thử)")
 
-    # Vô hiệu hóa OTP ngay lập tức sau 1 lần dùng
     otp.TrangThai = "DA_SU_DUNG"
     gd.TrangThai = "PROCESSING"
     gd.UpdatedAt = datetime.utcnow()

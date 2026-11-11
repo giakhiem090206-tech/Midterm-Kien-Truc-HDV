@@ -1,6 +1,4 @@
-# Stack kiểm thử cô lập, dùng cùng cấu hình SMTP thật từ .env:
-#   docker compose -p midterm-check -f docker-compose.yml -f docker-compose.test.yml up -d --build
-# Gateway mặc định ở port 18080; test_concurrency.py chọn cổng riêng khi chạy song song với app chính.
+
 services:
   gateway:
     ports: !override

@@ -7,14 +7,12 @@ from sqlalchemy.orm import Session, declarative_base, sessionmaker
 from security import get_current_user_id, verify_internal_key
 from service_app import create_app
 from redis_cache import get_cache, set_cache, delete_cache
-# 1. Cấu hình Database
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://root:rootpassword@db:5432/tuition_db")
 
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-# 2. Database Models
 class SinhVienModel(Base):
     __tablename__ = "SinhVien"
     MSSV = Column(String(20), primary_key=True)
@@ -38,10 +36,8 @@ def get_db():
     finally:
         db.close()
 
-# 3. Khởi tạo FastAPI
 @asynccontextmanager
 async def lifespan(app):
-    # Migration cộng thêm cho DB tạo trước khi có khoá idempotency của saga
     with engine.begin() as connection:
         connection.execute(text(
             'ALTER TABLE "HocPhi" ADD COLUMN IF NOT EXISTS "MaGiaoDichThanhToan" VARCHAR(50)'
@@ -54,7 +50,6 @@ async def lifespan(app):
 
 app, logger = create_app("Tuition Service", "tuition-service", docs_prefix="/api/v1/tuitions", lifespan=lifespan)
 
-# 4. Pydantic Schemas
 class TuitionDetailResponse(BaseModel):
     MaHocPhi: int
     MSSV: str
@@ -71,7 +66,6 @@ class MarkPaidResponse(BaseModel):
 class MarkPaidRequest(BaseModel):
     transaction_id: str = Field(min_length=1, max_length=50)
 
-# 5. API Endpoints
 
 @app.get("/api/v1/tuitions/{mssv}", response_model=TuitionDetailResponse, tags=["Tuition Public"],
          dependencies=[Depends(get_current_user_id)])
@@ -79,9 +73,6 @@ def lookup_tuition(
     mssv: str = Path(..., title="Mã số sinh viên", min_length=1, max_length=20),
     db: Session = Depends(get_db)
 ):
-    """
-    Tra cứu khoản học phí CHƯA_ĐÓNG của sinh viên theo MSSV (Dành cho Frontend, cần đăng nhập)
-    """
     normalized_mssv = mssv.strip().upper()
     cache_key = f"tuition:{normalized_mssv}"
     cached_data = get_cache(cache_key)
@@ -96,9 +87,6 @@ def lookup_tuition(
             detail="Không tìm thấy sinh viên"
         )
 
-
-
-    # Tìm khoản học phí chưa đóng
     hp = db.query(HocPhiModel).filter(
         HocPhiModel.MSSV == sv.MSSV,
         HocPhiModel.TrangThai == "CHUA_DONG"
@@ -125,9 +113,6 @@ def lookup_tuition(
 @app.get("/api/v1/tuitions/detail/{ma_hoc_phi}", response_model=TuitionDetailResponse, tags=["Tuition Internal"],
          dependencies=[Depends(verify_internal_key)])
 def get_tuition_by_id(ma_hoc_phi: int, db: Session = Depends(get_db)):
-    """
-    API nội bộ: Lấy chi tiết khoản học phí theo MaHocPhi (Cho Payment Service gọi)
-    """
     hp = db.query(HocPhiModel).filter(HocPhiModel.MaHocPhi == ma_hoc_phi).first()
     if not hp:
         raise HTTPException(status_code=404, detail="Không tìm thấy khoản học phí")
@@ -146,15 +131,10 @@ def get_tuition_by_id(ma_hoc_phi: int, db: Session = Depends(get_db)):
 @app.post("/api/v1/tuitions/{ma_hoc_phi}/pay", response_model=MarkPaidResponse, tags=["Tuition Internal"],
           dependencies=[Depends(verify_internal_key)])
 def mark_tuition_as_paid(ma_hoc_phi: int, request: MarkPaidRequest, db: Session = Depends(get_db)):
-    """
-    API nội bộ: Được gọi bởi Payment Service để cập nhật gạch nợ học phí sang DA_DONG
-    """
-    # 1. Tìm khoản học phí trước để lấy MSSV phục vụ việc xóa cache
     hp = db.query(HocPhiModel).filter(HocPhiModel.MaHocPhi == ma_hoc_phi).first()
     if not hp:
         raise HTTPException(status_code=404, detail="Khoản học phí không tồn tại")
 
-    # 2. UPDATE có điều kiện (atomic)
     updated = db.query(HocPhiModel).filter(
         HocPhiModel.MaHocPhi == ma_hoc_phi,
         HocPhiModel.TrangThai == "CHUA_DONG"
@@ -164,9 +144,8 @@ def mark_tuition_as_paid(ma_hoc_phi: int, request: MarkPaidRequest, db: Session 
     }, synchronize_session=False)
     db.commit()
 
-    # 3. Nếu gạch nợ thành công lần đầu (updated == 1)
     if updated > 0:
-        delete_cache(f"tuition:{hp.MSSV}")  #  Xóa cache ngay khi thanh toán thành công!
+        delete_cache(f"tuition:{hp.MSSV}")  
         logger.info("Giao dịch %s: gạch nợ MaHocPhi=%s thành công, đã xóa cache cho sinh viên %s", 
                     request.transaction_id, ma_hoc_phi, hp.MSSV)
         return {
@@ -175,7 +154,6 @@ def mark_tuition_as_paid(ma_hoc_phi: int, request: MarkPaidRequest, db: Session 
             "message": "Đã gạch nợ học phí thành công"
         }
 
-    # 4. Nếu updated == 0 (Khoản học phí đã được đóng từ trước)
     db.refresh(hp)
     if hp.TrangThai == "DA_DONG" and hp.MaGiaoDichThanhToan == request.transaction_id:
         logger.info("Giao dịch %s đã gạch nợ MaHocPhi=%s trước đó (idempotent)", request.transaction_id, ma_hoc_phi)

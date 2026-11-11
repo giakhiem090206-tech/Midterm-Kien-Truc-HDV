@@ -1,12 +1,4 @@
-"""
-Logging & tracing dùng chung cho mọi service.
 
-Mỗi request mang một X-Request-ID: API Gateway (Nginx) sinh ra khi request vào hệ thống,
-các service ghi ID này vào mọi dòng log và gửi tiếp khi gọi service khác. Lọc log theo một
-ID sẽ thấy toàn bộ đường đi của request đó qua Gateway -> Payment -> Auth/Tuition/Notification:
-
-    docker compose logs | grep <request-id>
-"""
 import logging
 import time
 import uuid
